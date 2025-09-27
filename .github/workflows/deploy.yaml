@@ -114,10 +114,6 @@ jobs:
           method: kubeconfig
           kubeconfig: ${{ env.KUBE_CONFIG }}
       
-      - name: Create namespace if not exists
-        run: |
-          kubectl create namespace ${{ env.SAUSAGE_STORE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-      
       - name: Add Nexus Helm Repository
         run: |
           helm repo add nexus ${{ env.NEXUS_HELM_REPO }} --username ${{ env.NEXUS_HELM_REPO_USER }} --password ${{ env.NEXUS_HELM_REPO_PASSWORD }}
