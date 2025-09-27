@@ -21,7 +21,7 @@ public class SausageApplication {
         return args -> {
             try {
                 // Check if products already exist to avoid duplicates
-                if (productService.findAll().isEmpty()) {
+                if (!productService.getAllProducts().iterator().hasNext()) {
                     productService.save(new Product(1L, "Сливочная", 320.00, "https://res.cloudinary.com/sugrobov/image/upload/v1623323635/repos/sausages/6.jpg"));
                     productService.save(new Product(2L, "Особая", 179.00, "https://res.cloudinary.com/sugrobov/image/upload/v1623323635/repos/sausages/5.jpg"));
                     productService.save(new Product(3L, "Молочная", 225.00, "https://res.cloudinary.com/sugrobov/image/upload/v1623323635/repos/sausages/4.jpg"));
