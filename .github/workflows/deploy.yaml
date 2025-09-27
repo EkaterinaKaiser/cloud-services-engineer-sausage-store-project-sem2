@@ -114,23 +114,26 @@ jobs:
           method: kubeconfig
           kubeconfig: ${{ env.KUBE_CONFIG }}
       
-      - name: Add Nexus Helm Repository
+      - name: Prepare Helm Chart
         run: |
-          helm repo add nexus ${{ env.NEXUS_HELM_REPO }} --username ${{ env.NEXUS_HELM_REPO_USER }} --password ${{ env.NEXUS_HELM_REPO_PASSWORD }}
-          helm repo update
-          
-          echo "Nexus Helm repository added and updated"
+          cd sausage-store-chart
+          helm dependency update
+          helm package . --destination ./packages
       
-      - name: Deploy with Helm from Nexus
+      - name: Deploy with Helm Chart
         run: |
-          helm upgrade --install sausage-store nexus/sausage-store \
+          cd sausage-store-chart
+          CHART_FILE=$(ls ./packages/sausage-store-*.tgz | head -1)
+          
+          helm upgrade --install sausage-store $CHART_FILE \
             --namespace ${{ env.SAUSAGE_STORE_NAMESPACE }} \
             --create-namespace \
             --set frontend.image=${{ secrets.DOCKER_USER }}/sausage-frontend:latest \
             --set backend.image=${{ secrets.DOCKER_USER }}/sausage-backend:latest \
             --set backend-report.image=${{ secrets.DOCKER_USER }}/sausage-backend-report:latest \
             --set global.imagePullPolicy=Always \
-            --wait \
+            --skip-crds \
+            --atomic \
             --timeout=10m
       
       - name: Verify deployment
