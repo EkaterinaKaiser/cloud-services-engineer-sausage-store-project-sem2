@@ -9,7 +9,7 @@ env:
   NEXUS_HELM_REPO: ${{ secrets.NEXUS_HELM_REPO }}
   NEXUS_HELM_REPO_USER: ${{ secrets.NEXUS_HELM_REPO_USER }}
   NEXUS_HELM_REPO_PASSWORD: ${{ secrets.NEXUS_HELM_REPO_PASSWORD }}
-  SAUSAGE_STORE_NAMESPACE: sausage-store
+  SAUSAGE_STORE_NAMESPACE: r-devops-magistracy-project-2sem-907324971
   KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
   VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
   DOCKER_USER: ${{ secrets.DOCKER_USER }}
@@ -127,7 +127,6 @@ jobs:
           
           helm upgrade --install sausage-store $CHART_FILE \
             --namespace ${{ env.SAUSAGE_STORE_NAMESPACE }} \
-            --create-namespace \
             --set frontend.image=${{ secrets.DOCKER_USER }}/sausage-frontend:latest \
             --set backend.image=${{ secrets.DOCKER_USER }}/sausage-backend:latest \
             --set backend-report.image=${{ secrets.DOCKER_USER }}/sausage-backend-report:latest \
