@@ -16,7 +16,7 @@ frontend:
     targetPort: 80
   ingress:
     enabled: true
-    host: "sausage-store.local"  # Will be set via --set in GitHub Actions
+    host: ""  # Empty host for IP access
     path: /
     pathType: Prefix
     annotations:
