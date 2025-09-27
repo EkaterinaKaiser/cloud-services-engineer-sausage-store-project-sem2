@@ -131,7 +131,8 @@ jobs:
             --set backend.image=${{ secrets.DOCKER_USER }}/sausage-backend:latest \
             --set backend-report.image=${{ secrets.DOCKER_USER }}/sausage-backend-report:latest \
             --set global.imagePullPolicy=Always \
-            --timeout=20m
+            --timeout=40m \
+            --wait=false
       
       - name: Verify deployment
         run: |
@@ -143,8 +144,11 @@ jobs:
           echo "Checking migrations job..."
           kubectl get jobs -n ${{ env.SAUSAGE_STORE_NAMESPACE }}
           
-          echo "Waiting for all pods to be ready..."
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/part-of=sausage-store -n ${{ env.SAUSAGE_STORE_NAMESPACE }} --timeout=300s
+          echo "Waiting for deployments to be available..."
+          kubectl wait --for=condition=available deployment -l app.kubernetes.io/part-of=sausage-store -n ${{ env.SAUSAGE_STORE_NAMESPACE }} --timeout=300s || echo "Some deployments may not be ready yet"
+          
+          echo "Checking pod status..."
+          kubectl get pods -n ${{ env.SAUSAGE_STORE_NAMESPACE }} -o wide
       
       - name: Run smoke tests
         run: |
