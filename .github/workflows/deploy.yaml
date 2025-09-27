@@ -131,9 +131,7 @@ jobs:
             --set backend.image=${{ secrets.DOCKER_USER }}/sausage-backend:latest \
             --set backend-report.image=${{ secrets.DOCKER_USER }}/sausage-backend-report:latest \
             --set global.imagePullPolicy=Always \
-            --skip-crds \
-            --atomic \
-            --timeout=10m
+            --timeout=20m
       
       - name: Verify deployment
         run: |
