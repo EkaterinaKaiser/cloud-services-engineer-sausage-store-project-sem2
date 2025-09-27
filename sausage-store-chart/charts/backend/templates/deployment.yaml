@@ -2,16 +2,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}
+  name: {{ include "backend.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: "{{ .Release.Name }}"
-    app.kubernetes.io/version: "{{ .Chart.AppVersion }}"
-    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
-    helm.sh/chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
-    app.kubernetes.io/component: {{ .Chart.Name }}
-    app.kubernetes.io/part-of: {{ .Release.Name }}
+    {{- include "backend.labels" . | nindent 4 }}
 spec:
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.replicas }}
@@ -19,7 +13,7 @@ spec:
 {{ toYaml .Values.strategy | indent 4 }} 
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-{{ .Chart.Name }}
+      {{- include "backend.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -27,71 +21,55 @@ spec:
         prometheus.io/port: "{{ .Values.annotations.port }}"
         prometheus.io/scrape: "{{ .Values.annotations.scrape }}"
       labels:
-        app: {{ .Release.Name }}-{{ .Chart.Name }}
+        {{- include "backend.selectorLabels" . | nindent 8 }}
     spec:
+      initContainers:
+        - name: wait-for-db
+          image: postgres:13
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for PostgreSQL to be ready..."
+              until pg_isready -h postgresql -p 5432 -U {{ .Values.env.postgresUser }}; do
+                echo "PostgreSQL is unavailable - sleeping"
+                sleep 2
+              done
+              echo "PostgreSQL is ready - checking if migrations are needed..."
+              
+              # Check if product table exists (indicates migrations completed)
+              until psql -h postgresql -p 5432 -U {{ .Values.env.postgresUser }} -d sausage-store -c "SELECT 1 FROM product LIMIT 1;" > /dev/null 2>&1; do
+                echo "Migrations not completed yet - waiting..."
+                sleep 5
+              done
+              echo "Database is ready - proceeding with backend startup"
+          env:
+            - name: PGPASSWORD
+              value: {{ .Values.env.postgresPassword }}
       containers:
         - name: {{ .Chart.Name }}
           image: {{ .Values.image }}
-          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           env:
             - name: SPRING_DATASOURCE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-                  key: postgres_uri
+              value: {{ .Values.env.postgresUri | quote }}
             - name: SPRING_DATASOURCE_USERNAME
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-                  key: postgres_user
+              value: {{ .Values.env.postgresUser | quote }}
             - name: SPRING_DATASOURCE_PASSWORD
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-                  key: postgres_password
+              value: {{ .Values.env.postgresPassword | quote }}
             - name: REPORT_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-                  key: report_path
+              value: {{ .Values.env.reportPath | quote }}
             - name: LOG_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-                  key: log_path
+              value: {{ .Values.env.logPath | quote }}
+            - name: SPRING_DATA_MONGODB_URI
+              value: mongodb://reportuser:reportpassword@mongodb:27017/reports
           resources:
-{{ toYaml .Values.resources | indent 12 }} 
+            {{- toYaml .Values.resources | nindent 12 }}
           ports:
-            - name: {{ .Chart.Name }}
+            - name: http
               containerPort: {{ .Values.containerPort }}
+              protocol: TCP
           livenessProbe:
-{{ toYaml .Values.livenessProbe | indent 12 }} 
-      volumes:
-      - name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-        configMap:
-          name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-          items:
-            - key: postgres_uri
-              path: postgres_uri
-            - key: postgres_user
-              path: postgres_user
-            - key: postgres_password
-              path: postgres_password
-            - key: report_path
-              path: report_path
-            - key: log_path
-              path: log_path
----
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-vpa
-spec:
-  targetRef:
-    apiVersion: "apps/v1"
-    kind: Deployment
-    name: {{ .Release.Name }}-{{ .Chart.Name }}
-  updatePolicy:
-{{ toYaml .Values.vpa.updatePolicy | indent 4 }} 
-  resourcePolicy:
-{{ toYaml .Values.vpa.resourcePolicy | indent 4 }} 
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }} 

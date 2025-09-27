@@ -1,0 +1,63 @@
+{{- if and .Values.mongodb.enabled .Values.mongodb.initJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "infra.fullname" . }}-mongodb-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb-init
+  annotations:
+    "helm.sh/hook": "post-install"
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "infra.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mongodb-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mongodb-init
+          image: mongo:4.4
+          imagePullPolicy: {{ .Values.mongodb.imagePullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for MongoDB to be ready..."
+              until mongo --host mongodb --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+                echo "MongoDB is unavailable - sleeping"
+                sleep 2
+              done
+              echo "MongoDB is ready - initializing database and user for reports"
+              
+              # Create database and user for reports
+              mongo --host mongodb --port 27017 -u {{ .Values.mongodb.env.MONGO_INITDB_ROOT_USERNAME }} -p {{ .Values.mongodb.env.MONGO_INITDB_ROOT_PASSWORD }} --authenticationDatabase admin <<EOF
+                use {{ .Values.mongodb.env.MONGO_INITDB_DATABASE }};
+                db.createUser({
+                  user: "reportuser",
+                  pwd: "reportpassword",
+                  roles: [
+                    { role: "readWrite", db: "{{ .Values.mongodb.env.MONGO_INITDB_DATABASE }}" }
+                  ]
+                });
+                print("Database and user created successfully");
+              EOF
+              
+              echo "MongoDB initialization completed successfully"
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_USERNAME | quote }}
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              value: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_PASSWORD | quote }}
+            - name: MONGO_INITDB_DATABASE
+              value: {{ .Values.mongodb.env.MONGO_INITDB_DATABASE | quote }}
+          resources:
+            {{- toYaml .Values.mongodb.initJob.resources | nindent 12 }}
+{{- end }}
