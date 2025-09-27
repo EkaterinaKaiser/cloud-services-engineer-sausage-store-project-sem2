@@ -13,6 +13,4 @@ spec:
     name: {{ include "backend.fullname" . }}
   updatePolicy:
     {{- toYaml .Values.vpa.updatePolicy | nindent 4 }}
-  resourcePolicy:
-    {{- toYaml .Values.vpa.resourcePolicy | nindent 4 }}
 {{- end }}

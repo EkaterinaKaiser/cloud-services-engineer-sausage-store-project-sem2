@@ -16,7 +16,7 @@ frontend:
     targetPort: 80
   ingress:
     enabled: true
-    host: ""  # Will be set via --set in GitHub Actions
+    host: "sausage-store.local"  # Will be set via --set in GitHub Actions
     path: /
     pathType: Prefix
     annotations:
@@ -84,13 +84,6 @@ backend:
     enabled: true
     updatePolicy:
       updateMode: "Off"
-    resourcePolicy:
-      cpu:
-        minAllowed: "100m"
-        maxAllowed: "2"
-      memory:
-        minAllowed: "128Mi"
-        maxAllowed: "1Gi"
 
 backend-report:
   replicas: 1
@@ -149,6 +142,7 @@ infra:
     enabled: true
     image: mongo:4.4
     imagePullPolicy: Always
+    containerPort: 27017
     env:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: rootpassword
