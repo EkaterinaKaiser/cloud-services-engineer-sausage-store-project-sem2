@@ -211,6 +211,19 @@ jobs:
           exit 0
         fi
         
+        # Способ 1.5: Создание временного файла и использование переменной
+        echo "Попытка 1.5: Временный файл + переменная окружения..."
+        TEMP_KUBECONFIG="/tmp/kubeconfig_temp"
+        echo "${{ secrets.KUBE_CONFIG }}" > "$TEMP_KUBECONFIG"
+        chmod 600 "$TEMP_KUBECONFIG"
+        export KUBECONFIG="$TEMP_KUBECONFIG"
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "Успешно подключились (временный файл + переменная)"
+          kubectl cluster-info
+          rm -f "$TEMP_KUBECONFIG"
+          exit 0
+        fi
+        
         # Способ 2: Прямое создание файла
         echo "Попытка 2: Создание файла kubeconfig..."
         echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
@@ -245,15 +258,35 @@ jobs:
           exit 0
         fi
         
+        # Способ 5: Проверка структуры kubeconfig
+        echo "Попытка 5: Анализ структуры kubeconfig..."
+        echo "Проверка наличия обязательных полей:"
+        echo "- apiVersion: $(grep -c 'apiVersion:' ~/.kube/config || echo '0')"
+        echo "- kind: $(grep -c 'kind:' ~/.kube/config || echo '0')"
+        echo "- clusters: $(grep -c 'clusters:' ~/.kube/config || echo '0')"
+        echo "- contexts: $(grep -c 'contexts:' ~/.kube/config || echo '0')"
+        echo "- users: $(grep -c 'users:' ~/.kube/config || echo '0')"
+        echo "- current-context: $(grep -c 'current-context:' ~/.kube/config || echo '0')"
+        
+        # Проверка валидности YAML
+        if command -v yq >/dev/null 2>&1; then
+          echo "Проверка YAML с помощью yq:"
+          yq eval '.' ~/.kube/config >/dev/null 2>&1 && echo "YAML валиден" || echo "YAML невалиден"
+        fi
+        
         echo "Не удалось подключиться к кластеру ни одним способом"
         echo "Проверка содержимого kubeconfig:"
         echo "Размер файла: $(wc -c < ~/.kube/config) байт"
-        echo "Первые 10 строк:"
-        head -10 ~/.kube/config
-        echo "Последние 10 строк:"
-        tail -10 ~/.kube/config
+        echo "Первые 10 строк (без чувствительных данных):"
+        head -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
+        echo "Последние 10 строк (без чувствительных данных):"
+        tail -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
         echo "Проверка синтаксиса YAML:"
-        kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || true
+        kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || kubectl --kubeconfig=~/.kube/config get nodes --dry-run 2>&1 || true
+        echo "Проверка версии kubectl:"
+        kubectl version --client
+        echo "Проверка доступности API сервера:"
+        kubectl --kubeconfig=~/.kube/config cluster-info --request-timeout=10s 2>&1 || true
         exit 1
 
     - name: Clean up existing resources
