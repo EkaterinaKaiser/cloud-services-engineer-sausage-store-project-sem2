@@ -202,9 +202,12 @@ jobs:
         mkdir -p ~/.kube
         echo "Настройка kubectl..."
         
+        # Устанавливаем переменную окружения для всех команд
+        export KUBECONFIG_CONTENT="${{ secrets.KUBE_CONFIG }}"
+        
         # Способ 1: Использование переменной окружения KUBECONFIG
         echo "Попытка 1: Использование переменной окружения..."
-        export KUBECONFIG="${{ secrets.KUBE_CONFIG }}"
+        export KUBECONFIG="$KUBECONFIG_CONTENT"
         if kubectl cluster-info >/dev/null 2>&1; then
           echo "Успешно подключились (переменная окружения)"
           kubectl cluster-info
@@ -214,7 +217,7 @@ jobs:
         # Способ 1.5: Создание временного файла и использование переменной
         echo "Попытка 1.5: Временный файл + переменная окружения..."
         TEMP_KUBECONFIG="/tmp/kubeconfig_temp"
-        echo "${{ secrets.KUBE_CONFIG }}" > "$TEMP_KUBECONFIG"
+        echo "$KUBECONFIG_CONTENT" > "$TEMP_KUBECONFIG"
         chmod 600 "$TEMP_KUBECONFIG"
         export KUBECONFIG="$TEMP_KUBECONFIG"
         if kubectl cluster-info >/dev/null 2>&1; then
@@ -226,7 +229,7 @@ jobs:
         
         # Способ 2: Прямое создание файла
         echo "Попытка 2: Создание файла kubeconfig..."
-        echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+        echo "$KUBECONFIG_CONTENT" > ~/.kube/config
         chmod 600 ~/.kube/config
         
         if kubectl cluster-info >/dev/null 2>&1; then
@@ -237,7 +240,7 @@ jobs:
         
         # Способ 3: Декодирование base64
         echo "Попытка 3: Декодирование base64..."
-        if echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config 2>/dev/null; then
+        if echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config 2>/dev/null; then
           chmod 600 ~/.kube/config
           if kubectl cluster-info >/dev/null 2>&1; then
             echo "Успешно подключились (base64)"
@@ -249,7 +252,7 @@ jobs:
         # Способ 4: Очистка и повторная попытка
         echo "Попытка 4: Очистка и повторная попытка..."
         # Убираем лишние пробелы и переносы строк
-        echo "${{ secrets.KUBE_CONFIG }}" | sed 's/^[[:space:]]*//' | grep -v '^$' > ~/.kube/config
+        echo "$KUBECONFIG_CONTENT" | sed 's/^[[:space:]]*//' | grep -v '^$' > ~/.kube/config
         chmod 600 ~/.kube/config
         
         if kubectl cluster-info >/dev/null 2>&1; then
@@ -281,12 +284,22 @@ jobs:
         head -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
         echo "Последние 10 строк (без чувствительных данных):"
         tail -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
-        echo "Проверка синтаксиса YAML:"
-        kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || kubectl --kubeconfig=~/.kube/config get nodes --dry-run 2>&1 || true
+        echo "Проверка существования kubeconfig:"
+        if [ -f ~/.kube/config ]; then
+          echo "Файл kubeconfig существует"
+          echo "Проверка синтаксиса YAML:"
+          kubectl --kubeconfig=~/.kube/config get nodes --dry-run 2>&1 || kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || true
+          echo "Проверка доступности API сервера:"
+          kubectl --kubeconfig=~/.kube/config cluster-info --request-timeout=10s 2>&1 || kubectl cluster-info --request-timeout=10s 2>&1 || true
+        else
+          echo "Файл kubeconfig не существует"
+          echo "Проверка переменной KUBECONFIG:"
+          echo "KUBECONFIG=$KUBECONFIG"
+          echo "Проверка доступности API сервера без файла:"
+          kubectl cluster-info --request-timeout=10s 2>&1 || true
+        fi
         echo "Проверка версии kubectl:"
         kubectl version --client
-        echo "Проверка доступности API сервера:"
-        kubectl --kubeconfig=~/.kube/config cluster-info --request-timeout=10s 2>&1 || true
         exit 1
 
     - name: Clean up existing resources
