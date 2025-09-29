@@ -16,7 +16,7 @@ spec:
     - containerName: backend
       minAllowed:
         cpu: 100m
-        memory: 128Mi
+        memory: 100Mi
       maxAllowed:
-        cpu: 1000m
-        memory: 1Gi
+        cpu: 500m
+        memory: 400Mi

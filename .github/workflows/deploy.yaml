@@ -211,6 +211,9 @@ jobs:
         if kubectl cluster-info >/dev/null 2>&1; then
           echo "Успешно подключились (переменная окружения)"
           kubectl cluster-info
+          # Проверяем права доступа
+          echo "Проверка прав доступа..."
+          kubectl get pods --all-namespaces >/dev/null 2>&1 || kubectl get pods >/dev/null 2>&1 || echo "Ограниченные права доступа"
           exit 0
         fi
         
@@ -291,12 +294,16 @@ jobs:
           kubectl --kubeconfig=~/.kube/config get nodes --dry-run 2>&1 || kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || true
           echo "Проверка доступности API сервера:"
           kubectl --kubeconfig=~/.kube/config cluster-info --request-timeout=10s 2>&1 || kubectl cluster-info --request-timeout=10s 2>&1 || true
+          echo "Проверка прав доступа в namespace:"
+          kubectl --kubeconfig=~/.kube/config get pods --all-namespaces 2>&1 || kubectl --kubeconfig=~/.kube/config get pods 2>&1 || true
         else
           echo "Файл kubeconfig не существует"
           echo "Проверка переменной KUBECONFIG:"
           echo "KUBECONFIG=$KUBECONFIG"
           echo "Проверка доступности API сервера без файла:"
           kubectl cluster-info --request-timeout=10s 2>&1 || true
+          echo "Проверка прав доступа в namespace:"
+          kubectl get pods --all-namespaces 2>&1 || kubectl get pods 2>&1 || true
         fi
         echo "Проверка версии kubectl:"
         kubectl version --client
@@ -306,17 +313,21 @@ jobs:
       run: |
         echo "Очистка существующих ресурсов в Kubernetes..."
         
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
+        echo "Используем namespace: $NAMESPACE"
+        
         # Удаляем существующий релиз Helm, если он есть
-        helm uninstall sausage-store || echo "Релиз sausage-store не найден"
+        helm uninstall sausage-store -n $NAMESPACE || echo "Релиз sausage-store не найден"
         
-        # Удаляем все ресурсы с нашими лейблами
-        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app.kubernetes.io/part-of=sausage-store --ignore-not-found=true || true
-        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app=sausage-store --ignore-not-found=true || true
+        # Удаляем все ресурсы с нашими лейблами в текущем namespace
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app.kubernetes.io/part-of=sausage-store -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app=sausage-store -n $NAMESPACE --ignore-not-found=true || true
         
-        # Удаляем ресурсы по именам
-        kubectl delete deployment postgresql mongodb || true
-        kubectl delete service postgresql-service mongodb-service || true
-        kubectl delete job mongodb-init-job || true
+        # Удаляем ресурсы по именам в текущем namespace
+        kubectl delete deployment postgresql mongodb -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete service postgresql-service mongodb-service -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete job mongodb-init-job -n $NAMESPACE --ignore-not-found=true || true
         
         # Ждем завершения удаления
         echo "Ожидание завершения удаления ресурсов..."
@@ -326,7 +337,13 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
+        echo "Деплой в namespace: $NAMESPACE"
+        
         helm upgrade --install sausage-store nexus/sausage-store-chart \
+          --namespace $NAMESPACE \
+          --create-namespace \
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
           --set backend.image.tag=latest \
           --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
@@ -339,18 +356,22 @@ jobs:
       run: |
         echo "Проверка статуса деплоя..."
         
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
+        echo "Проверка в namespace: $NAMESPACE"
+        
         # Проверяем статус подов
-        kubectl get pods -l app.kubernetes.io/part-of=sausage-store
-        kubectl get pods -l app=sausage-store
+        kubectl get pods -l app.kubernetes.io/part-of=sausage-store -n $NAMESPACE
+        kubectl get pods -l app=sausage-store -n $NAMESPACE
         
         # Проверяем сервисы
-        kubectl get services -l app.kubernetes.io/part-of=sausage-store
-        kubectl get services -l app=sausage-store
+        kubectl get services -l app.kubernetes.io/part-of=sausage-store -n $NAMESPACE
+        kubectl get services -l app=sausage-store -n $NAMESPACE
         
         # Проверяем Ingress
-        kubectl get ingress
+        kubectl get ingress -n $NAMESPACE
         
         # Проверяем статус Helm релиза
-        helm status sausage-store
+        helm status sausage-store -n $NAMESPACE
         
         echo "Деплой завершен успешно!"
