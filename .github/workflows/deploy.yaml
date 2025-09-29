@@ -171,7 +171,7 @@ jobs:
         echo "Найден файл чарта: $CHART_FILE"
         curl -u ${{ secrets.NEXUS_HELM_REPO_USER }}:${{ secrets.NEXUS_HELM_REPO_PASSWORD }} \
           --upload-file "$CHART_FILE" \
-          ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-chart-$(date +%Y%m%d%H%M%S).tgz
+          ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-0.1.0.tgz
 
   deploy_helm_chart_to_kubernetes:
     needs: add_helm_chart_to_nexus
@@ -196,6 +196,12 @@ jobs:
       run: |
         helm repo add nexus ${{ secrets.NEXUS_HELM_REPO }} --username ${{ secrets.NEXUS_HELM_REPO_USER }} --password ${{ secrets.NEXUS_HELM_REPO_PASSWORD }}
         helm repo update
+        
+        # Проверяем репозиторий
+        echo "Проверка репозитория nexus:"
+        helm repo list
+        echo "Проверка доступности чартов:"
+        helm search repo nexus/ --versions
 
     - name: Configure kubectl
       run: |
