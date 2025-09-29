@@ -16,6 +16,13 @@
 1. Скопируйте содержимое файла `~/.kube/config`
 2. Вставьте его в GitHub Secret `KUBE_CONFIG` как есть (без кодирования)
 
+**Важно:** Убедитесь, что kubeconfig содержит полные данные, включая:
+- `apiVersion: v1`
+- `kind: Config`
+- `clusters` с `certificate-authority-data`
+- `contexts` с правильным контекстом
+- `users` с токеном или сертификатом
+
 ### Вариант 2: Base64 кодирование
 Если нужно закодировать kubeconfig в base64:
 
@@ -28,6 +35,21 @@ cat ~/.kube/config | base64 -b 0
 ```
 
 Затем вставьте результат в GitHub Secret `KUBE_CONFIG`.
+
+### Вариант 3: Проверка целостности kubeconfig
+Перед добавлением в GitHub Secret проверьте kubeconfig:
+
+```bash
+# Проверка синтаксиса
+kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client
+
+# Проверка размера файла
+wc -c ~/.kube/config
+
+# Проверка содержимого
+head -20 ~/.kube/config
+tail -20 ~/.kube/config
+```
 
 ### Вариант 3: Проверка формата
 Чтобы проверить, в каком формате ваш kubeconfig:
