@@ -238,6 +238,15 @@ jobs:
         NAMESPACE="r-devops-magistracy-project-2sem-907324971"
         echo "Деплой в namespace: $NAMESPACE"
         
+        # Обновляем репозиторий перед деплоем
+        echo "Обновление Helm репозитория..."
+        helm repo update
+        
+        # Проверяем доступные чарты в репозитории
+        echo "Доступные чарты в репозитории:"
+        helm search repo nexus/ --versions
+        
+        # Деплоим с указанием версии чарта
         helm upgrade --install sausage-store nexus/sausage-store-chart \
           --namespace $NAMESPACE \
           --create-namespace \
