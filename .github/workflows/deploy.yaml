@@ -155,20 +155,20 @@ jobs:
         echo "VERSION=${{ github.sha }}" >> .env
         
         # Останавливаем и удаляем существующие контейнеры
-        docker-compose down --remove-orphans || true
+        docker compose down --remove-orphans || true
         
         # Запускаем сервисы с образами из Docker Hub
-        docker-compose up -d
+        docker compose up -d
         
         # Ждем запуска сервисов
         sleep 30
         
         # Выполняем миграции базы данных
         echo "Выполнение миграций базы данных..."
-        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
-        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
-        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
-        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
+        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
+        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
+        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
+        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
         
         echo "Деплой завершен! Сервисы доступны на:"
         echo "- Frontend: http://localhost:80"
