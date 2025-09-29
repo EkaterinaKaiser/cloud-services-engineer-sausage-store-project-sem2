@@ -35,10 +35,7 @@ jobs:
       with:
         images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=latest
 
     - name: Extract metadata for frontend
       id: meta-frontend
@@ -46,10 +43,7 @@ jobs:
       with:
         images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=latest
 
     - name: Extract metadata for backend-report
       id: meta-backend-report
@@ -57,10 +51,7 @@ jobs:
       with:
         images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=latest
 
     - name: Build and push backend image
       uses: docker/build-push-action@v4
@@ -152,23 +143,33 @@ jobs:
         
         # Создаем .env файл с переменными окружения
         echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
-        echo "VERSION=${{ github.sha }}" >> .env
+        echo "VERSION=latest" >> .env
+        
+        # Проверяем существование образов
+        echo "Проверяем существование образов в Docker Hub..."
+        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend:latest || echo "Backend образ не найден, будет собран локально"
+        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend:latest || echo "Frontend образ не найден, будет собран локально"
+        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report:latest || echo "Backend-report образ не найден, будет собран локально"
         
         # Останавливаем и удаляем существующие контейнеры
         docker compose down --remove-orphans || true
         
-        # Запускаем сервисы с образами из Docker Hub
-        docker compose up -d
+        # Собираем образы локально, если они не найдены в Docker Hub
+        echo "Собираем образы локально..."
+        docker compose -f docker-compose.local.yml build --no-cache
+        
+        # Запускаем сервисы
+        docker compose -f docker-compose.local.yml up -d
         
         # Ждем запуска сервисов
         sleep 30
         
         # Выполняем миграции базы данных
         echo "Выполнение миграций базы данных..."
-        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
-        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
-        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
-        docker compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
+        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
+        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
+        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
+        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
         
         echo "Деплой завершен! Сервисы доступны на:"
         echo "- Frontend: http://localhost:80"
