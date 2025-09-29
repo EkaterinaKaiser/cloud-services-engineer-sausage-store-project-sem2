@@ -142,18 +142,35 @@ jobs:
     - name: Update Helm dependencies
       run: |
         cd sausage-store-chart
+        echo "Обновление зависимостей Helm..."
         helm dependency update
         helm dependency build
+        echo "Зависимости обновлены"
+        echo "Список зависимостей:"
+        helm dependency list
 
     - name: Package Helm chart
       run: |
+        echo "Упаковка Helm чарта..."
         helm package sausage-store-chart/
+        echo "Список созданных файлов:"
         ls -la *.tgz
+        echo "Содержимое рабочей директории:"
+        ls -la
 
     - name: Upload chart to Nexus
       run: |
+        echo "Загрузка чарта в Nexus..."
+        CHART_FILE=$(ls sausage-store-*.tgz | head -n1)
+        if [ -z "$CHART_FILE" ]; then
+          echo "Ошибка: Файл чарта не найден!"
+          echo "Доступные файлы:"
+          ls -la *.tgz || echo "Нет .tgz файлов"
+          exit 1
+        fi
+        echo "Найден файл чарта: $CHART_FILE"
         curl -u ${{ secrets.NEXUS_HELM_REPO_USER }}:${{ secrets.NEXUS_HELM_REPO_PASSWORD }} \
-          --upload-file sausage-store-chart-*.tgz \
+          --upload-file "$CHART_FILE" \
           ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-chart-$(date +%Y%m%d%H%M%S).tgz
 
   deploy_helm_chart_to_kubernetes:
@@ -188,7 +205,7 @@ jobs:
 
     - name: Clean up existing resources
       run: |
-        echo "🧹 Очистка существующих ресурсов в Kubernetes..."
+        echo "Очистка существующих ресурсов в Kubernetes..."
         
         # Удаляем существующий релиз Helm, если он есть
         helm uninstall sausage-store || echo "Релиз sausage-store не найден"
@@ -203,10 +220,10 @@ jobs:
         kubectl delete job mongodb-init-job || true
         
         # Ждем завершения удаления
-        echo "⏳ Ожидание завершения удаления ресурсов..."
+        echo "Ожидание завершения удаления ресурсов..."
         sleep 30
         
-        echo "✅ Очистка завершена"
+        echo "Очистка завершена"
 
     - name: Deploy to Kubernetes
       run: |
@@ -221,7 +238,7 @@ jobs:
 
     - name: Verify deployment
       run: |
-        echo "🔍 Проверка статуса деплоя..."
+        echo "Проверка статуса деплоя..."
         
         # Проверяем статус подов
         kubectl get pods -l app.kubernetes.io/part-of=sausage-store
@@ -237,4 +254,4 @@ jobs:
         # Проверяем статус Helm релиза
         helm status sausage-store
         
-        echo "✅ Деплой завершен успешно!"
+        echo "Деплой завершен успешно!"
