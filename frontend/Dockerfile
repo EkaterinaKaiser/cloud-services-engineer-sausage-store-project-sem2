@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile для Angular frontend
 
 # Этап 1: Сборка Angular приложения
-FROM node:16-alpine as build
+FROM node:16-alpine AS build
 
 # Установка рабочей директории
 WORKDIR /app
@@ -9,14 +9,17 @@ WORKDIR /app
 # Копирование package.json и package-lock.json
 COPY package*.json ./
 
-# Установка зависимостей
-RUN npm ci --only=production
+# Установка всех зависимостей (включая devDependencies для сборки)
+RUN npm ci
+
+# Установка Angular CLI глобально
+RUN npm install -g @angular/cli@6.0.8
 
 # Копирование исходного кода
 COPY . .
 
 # Сборка приложения для продакшена
-RUN npm run build --prod
+RUN ng build --prod
 
 # Этап 2: Nginx для раздачи статики
 FROM nginx:alpine
