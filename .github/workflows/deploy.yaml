@@ -1,82 +1,135 @@
-name: Sausage Store Deploy
+name: Build and Deploy Sausage Store
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
-  NEXUS_HELM_REPO: ${{ secrets.NEXUS_HELM_REPO }}
-  NEXUS_HELM_REPO_USER: ${{ secrets.NEXUS_HELM_REPO_USER }}
-  NEXUS_HELM_REPO_PASSWORD: ${{ secrets.NEXUS_HELM_REPO_PASSWORD }}
-  SAUSAGE_STORE_NAMESPACE: YOUR_NAMESPACE
-  KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-  VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+  DOCKER_REGISTRY: docker.io
+  IMAGE_NAME_BACKEND: sausage-store-backend
+  IMAGE_NAME_FRONTEND: sausage-store-frontend
+  IMAGE_NAME_BACKEND_REPORT: sausage-store-backend-report
 
 jobs:
-  # Сборка и пуш образов в докерхаб:
-  build_and_push_to_docker_hub:
-      name: Push Docker image to DockerHub
-      runs-on: ubuntu-latest
-      steps:
-        - name: Check out the repo
-          # Получение исходного кода из репозитория:
-          uses: actions/checkout@v3
-        - name: Set up Docker Buildx
-          # Установка сборщика контейнеров Docker:
-          uses: docker/setup-buildx-action@v2
-        - name: Login to Docker 
-          # Авторизация на Docker Hub:
-          uses: docker/login-action@v2
-          # При помощи with передаём в action параметры username и password:
-          with:
-            username: ${{ secrets.DOCKER_USER }}
-            password: ${{ secrets.DOCKER_PASSWORD }}
-            # Хорошо ли держать логин и пароль прямо в коде workflow?
-            # Нет, это нехорошо. Хранить пароль надо в Secrets.
-        - name: Push Backend to DockerHub
-          # Одновременный билд и пуш образа в Docker Hub:
-          uses: docker/build-push-action@v4
-          with:
-            # Параметр context: ./backend/ указывает, что нужный Dockerfile 
-            # находится в ./backend/
-            context: ./backend/
-            # Параметр push: true указывает, что образ нужно не только собрать,
-            # но и отправить на Docker Hub:
-            push: true
-            # В параметре tags задаётся название и тег для образа.
-            # Для каждого пересобранного образа 
-            # устанавливаем тег latest, чтобы потом
-            # на сервере и в docker-compose.yml не указывать версию образа:
-            tags: YOUR_DOCKERHUB/sausage-backend:latest
-            build-args: |
-              VERSION=${{ github.sha }}
-        - name: Push Frontend to DockerHub
-          uses: docker/build-push-action@v4
-          with:
-            context: ./frontend/
-            push: true
-            tags: YOUR_DOCKERHUB/sausage-frontend:latest
-        - name: Push Backend-report to DockerHub
-          uses: docker/build-push-action@v4
-          with:
-            context: ./backend-report/
-            push: true
-            tags: YOUR_DOCKERHUB/sausage-backend-report:latest
-  # Упаковываем helm-чарт и пушим его в Nexus
-  add_helm_chart_to_nexus:
-      name: Add Helm Chart To Nexus
-      runs-on: ubuntu-latest
-      needs: build_and_push_to_docker_hub
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      steps:
-      #### Опишите необходимые шаги
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
-  # Деплоим приложения в кластер Kubernetes с помощью helm-чарт
-  deploy_helm_chart_to_kubernetes:
-      name: Deploy Helm Chart To Kubernetes
-      runs-on: ubuntu-latest
-      needs: add_helm_chart_to_nexus
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
 
-      steps:
-      #### Опишите необходимые шаги
+    - name: Extract metadata for backend
+      id: meta-backend
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract metadata for frontend
+      id: meta-frontend
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract metadata for backend-report
+      id: meta-backend-report
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./backend
+        push: true
+        tags: ${{ steps.meta-backend.outputs.tags }}
+        labels: ${{ steps.meta-backend.outputs.labels }}
+        build-args: |
+          VERSION=${{ github.sha }}
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        labels: ${{ steps.meta-frontend.outputs.labels }}
+
+    - name: Build and push backend-report image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./backend-report
+        push: true
+        tags: ${{ steps.meta-backend-report.outputs.tags }}
+        labels: ${{ steps.meta-backend-report.outputs.labels }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+
+    - name: Deploy to Kubernetes
+      run: |
+        # Обновляем образы в Helm values
+        sed -i "s|repository: .*|repository: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}|g" sausage-store-chart/values.yaml
+        sed -i "s|tag: .*|tag: ${{ github.sha }}|g" sausage-store-chart/values.yaml
+        
+        # Выполняем миграции базы данных
+        echo "Выполнение миграций базы данных..."
+        # Здесь можно добавить выполнение миграций через kubectl или отдельный job
+        
+        # Деплой через Helm
+        helm upgrade --install sausage-store ./sausage-store-chart \
+          --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }} \
+          --set backend.image.tag=${{ github.sha }} \
+          --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }} \
+          --set frontend.image.tag=${{ github.sha }} \
+          --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }} \
+          --set backend-report.image.tag=${{ github.sha }}
+
+    - name: Run database migrations
+      run: |
+        # Создаем временный pod для выполнения миграций
+        kubectl run migration-pod --image=postgres:13 --rm -i --restart=Never -- \
+          psql -h postgres-service -U postgres -d sausage_store -f /migrations/V001__create_tables.sql
+        # Добавить остальные миграции по аналогии

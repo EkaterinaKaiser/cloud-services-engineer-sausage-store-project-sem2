@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: sausage_store
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - sausage-network
+
+  mongodb:
+    image: mongo:4.4
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - sausage-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        VERSION: local
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sausage_store
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password
+      SPRING_DATA_MONGODB_URI: mongodb://admin:password@mongodb:27017/sausage_store?authSource=admin
+    depends_on:
+      - postgres
+      - mongodb
+    networks:
+      - sausage-network
+
+  backend-report:
+    build:
+      context: ./backend-report
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/sausage_store?authSource=admin
+    depends_on:
+      - mongodb
+    networks:
+      - sausage-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - sausage-network
+
+volumes:
+  postgres_data:
+  mongodb_data:
+
+networks:
+  sausage-network:
+    driver: bridge
