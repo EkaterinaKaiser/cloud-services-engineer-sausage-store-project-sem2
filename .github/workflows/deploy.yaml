@@ -200,8 +200,48 @@ jobs:
     - name: Configure kubectl
       run: |
         mkdir -p ~/.kube
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+        echo "Настройка kubectl..."
+        
+        # Пробуем разные способы декодирования kubeconfig
+        KUBECONFIG_CONTENT="${{ secrets.KUBE_CONFIG }}"
+        
+        # Способ 1: Прямое использование (если уже в plain text)
+        echo "Попытка 1: Использование как plain text..."
+        echo "$KUBECONFIG_CONTENT" > ~/.kube/config
         chmod 600 ~/.kube/config
+        
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "Успешно подключились (plain text)"
+          kubectl cluster-info
+          exit 0
+        fi
+        
+        # Способ 2: Декодирование base64
+        echo "Попытка 2: Декодирование base64..."
+        if echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config 2>/dev/null; then
+          chmod 600 ~/.kube/config
+          if kubectl cluster-info >/dev/null 2>&1; then
+            echo "Успешно подключились (base64)"
+            kubectl cluster-info
+            exit 0
+          fi
+        fi
+        
+        # Способ 3: Двойное декодирование (если закодирован дважды)
+        echo "Попытка 3: Двойное декодирование base64..."
+        if echo "$KUBECONFIG_CONTENT" | base64 -d | base64 -d > ~/.kube/config 2>/dev/null; then
+          chmod 600 ~/.kube/config
+          if kubectl cluster-info >/dev/null 2>&1; then
+            echo "Успешно подключились (двойное base64)"
+            kubectl cluster-info
+            exit 0
+          fi
+        fi
+        
+        echo "Не удалось подключиться к кластеру ни одним способом"
+        echo "Содержимое kubeconfig (первые 100 символов):"
+        echo "$KUBECONFIG_CONTENT" | head -c 100
+        exit 1
 
     - name: Clean up existing resources
       run: |
