@@ -252,16 +252,22 @@ jobs:
         echo "Доступные чарты в репозитории:"
         helm search repo nexus/ --versions
         
+        # Проверяем доступность образов перед деплоем
+        echo "Проверка доступности образов:"
+        echo "Backend: ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend:${{ github.sha }}"
+        echo "Frontend: ${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend:${{ github.sha }}"
+        echo "Backend-report: ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report:${{ github.sha }}"
+        
         # Деплоим с указанием версии чарта
         helm upgrade --install sausage-store nexus/sausage-store \
           --namespace $NAMESPACE \
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
-          --set backend.image.tag=${{ github.sha }} \
+          --set backend.image.tag=latest \
           --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
-          --set frontend.image.tag=${{ github.sha }} \
+          --set frontend.image.tag=latest \
           --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report \
-          --set backend-report.image.tag=${{ github.sha }} \
-          --wait --timeout=300s
+          --set backend-report.image.tag=latest \
+          --wait --timeout=1200s --debug
 
     - name: Verify deployment
       run: |
