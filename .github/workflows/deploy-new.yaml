@@ -1,0 +1,223 @@
+name: Build, Push and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOCKER_REGISTRY: docker.io
+  IMAGE_NAME_BACKEND: sausage-store-backend
+  IMAGE_NAME_FRONTEND: sausage-store-frontend
+  IMAGE_NAME_BACKEND_REPORT: sausage-store-backend-report
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push backend
+      uses: docker/build-push-action@v4
+      with:
+        context: ./backend
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push frontend
+      uses: docker/build-push-action@v4
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push backend-report
+      uses: docker/build-push-action@v4
+      with:
+        context: ./backend-report
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  add_helm_chart_to_nexus:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Package Helm chart
+      run: |
+        cd sausage-store-chart
+        helm dependency update
+        helm dependency build
+        helm package .
+        ls -la *.tgz
+
+    - name: Upload chart to Nexus
+      run: |
+        cd sausage-store-chart
+        CHART_FILE=$(ls sausage-store-*.tgz | head -n1)
+        echo "Uploading chart: $CHART_FILE"
+        curl -u ${{ secrets.NEXUS_HELM_REPO_USER }}:${{ secrets.NEXUS_HELM_REPO_PASSWORD }} \
+          --upload-file $CHART_FILE \
+          ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-chart-$(date +%Y%m%d%H%M%S).tgz
+
+  deploy_helm_chart_to_kubernetes:
+    needs: [build-and-push, add_helm_chart_to_nexus]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Add Nexus Helm repository
+      run: |
+        helm repo add nexus ${{ secrets.NEXUS_HELM_REPO }} --username ${{ secrets.NEXUS_HELM_REPO_USER }} --password ${{ secrets.NEXUS_HELM_REPO_PASSWORD }}
+        helm repo update
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "Настройка kubectl..."
+        
+        # Создаем kubeconfig файл напрямую из предоставленного конфига
+        cat > ~/.kube/config << 'EOF'
+        apiVersion: v1
+        clusters:
+        - cluster:
+            certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJMU1ETXhNREV5TlRreU1Gb1hEVE0xTURNd09ERXlOVGt5TUZvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBS0FzCk5tSFVoZkVLY0dNRGcvVmkrY09jMWUvL0U4R3ZlL2s1S2ZVL2tDZzRsRUpNYXhMdHl1UWN0Ti91YmU0SlZCYlgKM3lwbEZ1V1Q3am9KVERIeEJWNG9peWN1MHFzUW5mNEJ2TjRvb3dNTlNaSlh3ZnJJWllBQUNZblRYOHRKTDhySgowUEViZVhEb29zVDNNME1NS3FrQ3Bpd2V2bThnTVBRSERSbmh6UXpUZml0UkFDQTFVS25YR2gxcStJU0JzNzMzCkJtajMzcFhDNUNKOFE1V09EM013RDI4NTF3RE9HTEMzNHdHUk5DbVcyRStjMDQ1TmRCN21Zd0wxNHUySG5oMU0Kcjd2YXRrMHo2TlM4YjBRamw5Z1hFVEVlSXJMTkFweEcwS0lTbitRdmIvYXkvOHBnaGRvekRpVzRuOGlLaWpBbAozaDB0cWVZVVg5U3RJMGR0bkJrQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZLYUZiVmxKVUp0SGRVREEwaXJrT1RYaWp6R3FNQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCUFBxc0trbDdzclRZK21kQTAyTjU2bmtkNmcxcFM4MHhaZXVjSy9kTUQwd2FOSHUwUApZeFIrRFpMVmhlOGlCV1J0NDcrRXRKY2MrRVU4V0tWU0I4T0gveklSa3k3ekg4aVZlUDhqbFV3U2Nwb0pXRUNuCjlZWWU0VHFjcWQwYkxoeTM0ZXZlT0xCbElJU3NqbkFLTy9HVkpxVXQwbVMrYTZhbTBxZzE3MVlwVUNWRHhPSUQKVytpdGhrZDJ4N3VoZDROREllaVczZ0tYNTl5VDZjVzQ0NHZ0WStIaDJpRDJjVHVWeFV4L3ZSb1BtMWVLOUdFWApid3JlM2tLNjMrU0NnTFRtSUE0Unp0ZXBtUHdRMnJUTnkrbjFZZ3plK0did1dRL3RoNUpWclZIYVRlQm9Yc2d1ClhzN0doNnorMjF5bTkrTkR0SmdJakRqaFJoTW9DcDgwdzBnVgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+            server: https://158.160.6.254
+          name: r-devops-magistracy-project-2sem-907324971
+        contexts:
+        - context:
+            cluster: r-devops-magistracy-project-2sem-907324971
+            user: r-devops-magistracy-project-2sem-907324971-sa
+          name: r-devops-magistracy-project-2sem-907324971-context
+        current-context: r-devops-magistracy-project-2sem-907324971-context
+        kind: Config
+        preferences: {}
+        users:
+        - name: r-devops-magistracy-project-2sem-907324971-sa
+          user:
+            token: eyJhbGciOiJSUzI1NiIsImtpZCI6IlNNMVk4RGhPMFFDZzAydzdSTDByUWFGTVBib25uOHN1RjRFTjVLc0M3MUkifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJyLWRldm9wcy1tYWdpc3RyYWN5LXByb2plY3QtMnNlbS05MDczMjQ5NzEiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlY3JldC5uYW1lIjoici1kZXZvcHMtbWFnaXN0cmFjeS1wcm9qZWN0LTJzZW0tOTA3MzI0OTcxLWNyZWRzIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZXJ2aWNlLWFjY291bnQubmFtZSI6InItZGV2b3BzLW1hZ2lzdHJhY3ktcHJvamVjdC0yc2VtLTkwNzMyNDk3MS1zYSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc2M2ZjNThkLTcyNjctNGNjOS04MDgyLWIxZjA3ZDRjODAzZCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpyLWRldm9wcy1tYWdpc3RyYWN5LXByb2plY3QtMnNlbS05MDczMjQ5NzE6ci1kZXZvcHMtbWFnaXN0cmFjeS1wcm9qZWN0LTJzZW0tOTA3MzI0OTcxLXNhIn0.eK-yH2Bo6Qv6x-Vki9qT7uTUpF-GWV1_R8Yy6jmc_pCNUaYm4TSFvTFu7Iqyo-WdxWQibs2-Xf7K81zMhu8DF-w3krktAtbXCA9gMd-0s4ilXzDDfGYAblLLweWR6BKoK75GqkEDTln19Y7kZA3JpmsM6DivHy_np0ichlTiDjL03ezJiPi865j104DAnS2yZ3s_S87kB6XWgH3zoHjoOTcTNMgJA7l74KFnnCBdYmE2fY3jaWbUCf5HAStF78p7BILl4fBzYsE48K-gONnr-zxJPN-ZkIW_sEJ-2mW6YWmeK-0GAE4xCTutXQCuQvREhA9SxlITTozPMQpQNGrn7w
+        EOF
+        
+        chmod 600 ~/.kube/config
+        
+        echo "Проверка подключения к кластеру..."
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "✅ Успешно подключились к кластеру"
+          kubectl cluster-info
+          
+          # Используем фиксированный namespace
+          NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+          echo "Используем namespace: $NAMESPACE"
+          
+          # Проверяем права доступа в нашем namespace
+          echo "Проверка прав доступа в namespace $NAMESPACE..."
+          kubectl get pods -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на pods: OK" || echo "❌ Права на pods: ограничены"
+          kubectl get services -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на services: OK" || echo "❌ Права на services: ограничены"
+          kubectl get deployments -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на deployments: OK" || echo "❌ Права на deployments: ограничены"
+          
+        else
+          echo "❌ Не удалось подключиться к кластеру"
+          echo "Проверка содержимого kubeconfig:"
+          ls -la ~/.kube/
+          echo "Первые 5 строк kubeconfig:"
+          head -5 ~/.kube/config
+          exit 1
+        fi
+
+    - name: Clean up existing resources
+      run: |
+        echo "Очистка существующих ресурсов в Kubernetes..."
+        
+        # Используем фиксированный namespace
+        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        echo "Используем namespace: $NAMESPACE"
+        
+        # Удаляем существующий релиз Helm, если он есть
+        helm uninstall sausage-store -n $NAMESPACE || echo "Релиз sausage-store не найден"
+        
+        # Удаляем все ресурсы с нашими лейблами в текущем namespace
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app.kubernetes.io/part-of=sausage-store -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app=sausage-store -n $NAMESPACE --ignore-not-found=true || true
+        
+        # Удаляем ресурсы по именам в текущем namespace
+        kubectl delete deployment postgresql mongodb -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete service postgresql-service mongodb-service -n $NAMESPACE --ignore-not-found=true || true
+        kubectl delete job mongodb-init-job -n $NAMESPACE --ignore-not-found=true || true
+        
+        # Ждем завершения удаления
+        echo "Ожидание завершения удаления ресурсов..."
+        sleep 30
+        
+        echo "Очистка завершена"
+
+    - name: Deploy to Kubernetes
+      run: |
+        # Используем фиксированный namespace
+        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        echo "Деплой в namespace: $NAMESPACE"
+        
+        helm upgrade --install sausage-store nexus/sausage-store-chart \
+          --namespace $NAMESPACE \
+          --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
+          --set backend.image.tag=latest \
+          --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
+          --set frontend.image.tag=latest \
+          --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report \
+          --set backend-report.image.tag=latest \
+          --wait --timeout=300s
+
+    - name: Verify deployment
+      run: |
+        echo "Проверка статуса деплоя..."
+        
+        # Используем фиксированный namespace
+        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        echo "Проверка в namespace: $NAMESPACE"
+        
+        # Проверяем статус подов
+        kubectl get pods -l app.kubernetes.io/part-of=sausage-store -n $NAMESPACE
+        kubectl get pods -l app=sausage-store -n $NAMESPACE
+        
+        # Проверяем сервисы
+        kubectl get services -l app.kubernetes.io/part-of=sausage-store -n $NAMESPACE
+        kubectl get services -l app=sausage-store -n $NAMESPACE
+        
+        # Проверяем Ingress
+        kubectl get ingress -n $NAMESPACE
+        
+        # Проверяем статус Helm релиза
+        helm status sausage-store -n $NAMESPACE
+        
+        echo "Деплой завершен успешно!"

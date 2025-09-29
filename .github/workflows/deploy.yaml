@@ -1,4 +1,4 @@
-name: Build, Push and Deploy
+name: Build and Deploy Sausage Store
 
 on:
   push:
@@ -15,8 +15,10 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -27,66 +29,158 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Build and push backend
+    - name: Extract metadata for backend
+      id: meta-backend
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}
+        tags: |
+          type=raw,value=latest
+
+    - name: Extract metadata for frontend
+      id: meta-frontend
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}
+        tags: |
+          type=raw,value=latest
+
+    - name: Extract metadata for backend-report
+      id: meta-backend-report
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }}
+        tags: |
+          type=raw,value=latest
+
+    - name: Build and push backend image
       uses: docker/build-push-action@v4
       with:
         context: ./backend
         push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        tags: ${{ steps.meta-backend.outputs.tags }}
+        labels: ${{ steps.meta-backend.outputs.labels }}
+        build-args: |
+          VERSION=${{ github.sha }}
 
-    - name: Build and push frontend
+    - name: Build and push frontend image
       uses: docker/build-push-action@v4
       with:
         context: ./frontend
         push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        labels: ${{ steps.meta-frontend.outputs.labels }}
 
-    - name: Build and push backend-report
+    - name: Build and push backend-report image
       uses: docker/build-push-action@v4
       with:
         context: ./backend-report
         push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        tags: ${{ steps.meta-backend-report.outputs.tags }}
+        labels: ${{ steps.meta-backend-report.outputs.labels }}
+
+  # deploy:
+  #   needs: build-and-push
+  #   runs-on: ubuntu-latest
+  #   if: github.ref == 'refs/heads/main'
+  #   
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v3
+
+  #   - name: Set up kubectl
+  #     uses: azure/setup-kubectl@v3
+  #     with:
+  #       version: 'latest'
+
+  #   - name: Configure kubectl
+  #     run: |
+  #       mkdir -p ~/.kube
+  #       echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+  #       chmod 600 ~/.kube/config
+
+  #   - name: Deploy to Kubernetes
+  #     run: |
+  #       # Обновляем образы в Helm values
+  #       sed -i "s|repository: .*|repository: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}|g" sausage-store-chart/values.yaml
+  #       sed -i "s|tag: .*|tag: ${{ github.sha }}|g" sausage-store-chart/values.yaml
+  #       
+  #       # Выполняем миграции базы данных
+  #       echo "Выполнение миграций базы данных..."
+  #       # Здесь можно добавить выполнение миграций через kubectl или отдельный job
+  #       
+  #       # Деплой через Helm
+  #       helm upgrade --install sausage-store ./sausage-store-chart \
+  #         --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }} \
+  #         --set backend.image.tag=${{ github.sha }} \
+  #         --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }} \
+  #         --set frontend.image.tag=${{ github.sha }} \
+  #         --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }} \
+  #         --set backend-report.image.tag=${{ github.sha }}
+
+  #   - name: Run database migrations
+  #     run: |
+  #       # Создаем временный pod для выполнения миграций
+  #       kubectl run migration-pod --image=postgres:13 --rm -i --restart=Never -- \
+  #         psql -h postgres-service -U postgres -d sausage_store -f /migrations/V001__create_tables.sql
+  #       # Добавить остальные миграции по аналогии
 
   add_helm_chart_to_nexus:
     needs: build-and-push
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
     - name: Set up Helm
       uses: azure/setup-helm@v3
       with:
         version: '3.12.0'
 
-    - name: Package Helm chart
+    - name: Update Helm dependencies
       run: |
         cd sausage-store-chart
+        echo "Обновление зависимостей Helm..."
         helm dependency update
         helm dependency build
-        helm package .
+        echo "Зависимости обновлены"
+        echo "Список зависимостей:"
+        helm dependency list
+
+    - name: Package Helm chart
+      run: |
+        echo "Упаковка Helm чарта..."
+        helm package sausage-store-chart/
+        echo "Список созданных файлов:"
         ls -la *.tgz
+        echo "Содержимое рабочей директории:"
+        ls -la
 
     - name: Upload chart to Nexus
       run: |
-        cd sausage-store-chart
+        echo "Загрузка чарта в Nexus..."
         CHART_FILE=$(ls sausage-store-*.tgz | head -n1)
-        echo "Uploading chart: $CHART_FILE"
+        if [ -z "$CHART_FILE" ]; then
+          echo "Ошибка: Файл чарта не найден!"
+          echo "Доступные файлы:"
+          ls -la *.tgz || echo "Нет .tgz файлов"
+          exit 1
+        fi
+        echo "Найден файл чарта: $CHART_FILE"
         curl -u ${{ secrets.NEXUS_HELM_REPO_USER }}:${{ secrets.NEXUS_HELM_REPO_PASSWORD }} \
-          --upload-file $CHART_FILE \
+          --upload-file "$CHART_FILE" \
           ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-chart-$(date +%Y%m%d%H%M%S).tgz
 
   deploy_helm_chart_to_kubernetes:
-    needs: [build-and-push, add_helm_chart_to_nexus]
+    needs: add_helm_chart_to_nexus
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
     - name: Set up Helm
       uses: azure/setup-helm@v3
@@ -96,7 +190,7 @@ jobs:
     - name: Set up kubectl
       uses: azure/setup-kubectl@v3
       with:
-        version: 'v1.28.0'
+        version: 'latest'
 
     - name: Add Nexus Helm repository
       run: |
@@ -108,60 +202,119 @@ jobs:
         mkdir -p ~/.kube
         echo "Настройка kubectl..."
         
-        # Создаем kubeconfig файл напрямую из предоставленного конфига
-        cat > ~/.kube/config << 'EOF'
-        apiVersion: v1
-        clusters:
-        - cluster:
-            certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJMU1ETXhNREV5TlRreU1Gb1hEVE0xTURNd09ERXlOVGt5TUZvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBS0FzCk5tSFVoZkVLY0dNRGcvVmkrY09jMWUvL0U4R3ZlL2s1S2ZVL2tDZzRsRUpNYXhMdHl1UWN0Ti91YmU0SlZCYlgKM3lwbEZ1V1Q3am9KVERIeEJWNG9peWN1MHFzUW5mNEJ2TjRvb3dNTlNaSlh3ZnJJWllBQUNZblRYOHRKTDhySgowUEViZVhEb29zVDNNME1NS3FrQ3Bpd2V2bThnTVBRSERSbmh6UXpUZml0UkFDQTFVS25YR2gxcStJU0JzNzMzCkJtajMzcFhDNUNKOFE1V09EM013RDI4NTF3RE9HTEMzNHdHUk5DbVcyRStjMDQ1TmRCN21Zd0wxNHUySG5oMU0Kcjd2YXRrMHo2TlM4YjBRamw5Z1hFVEVlSXJMTkFweEcwS0lTbitRdmIvYXkvOHBnaGRvekRpVzRuOGlLaWpBbAozaDB0cWVZVVg5U3RJMGR0bkJrQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZLYUZiVmxKVUp0SGRVREEwaXJrT1RYaWp6R3FNQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCUFBxc0trbDdzclRZK21kQTAyTjU2bmtkNmcxcFM4MHhaZXVjSy9kTUQwd2FOSHUwUApZeFIrRFpMVmhlOGlCV1J0NDcrRXRKY2MrRVU4V0tWU0I4T0gveklSa3k3ekg4aVZlUDhqbFV3U2Nwb0pXRUNuCjlZWWU0VHFjcWQwYkxoeTM0ZXZlT0xCbElJU3NqbkFLTy9HVkpxVXQwbVMrYTZhbTBxZzE3MVlwVUNWRHhPSUQKVytpdGhrZDJ4N3VoZDROREllaVczZ0tYNTl5VDZjVzQ0NHZ0WStIaDJpRDJjVHVWeFV4L3ZSb1BtMWVLOUdFWApid3JlM2tLNjMrU0NnTFRtSUE0Unp0ZXBtUHdRMnJUTnkrbjFZZ3plK0did1dRL3RoNUpWclZIYVRlQm9Yc2d1ClhzN0doNnorMjF5bTkrTkR0SmdJakRqaFJoTW9DcDgwdzBnVgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
-            server: https://158.160.6.254
-          name: r-devops-magistracy-project-2sem-907324971
-        contexts:
-        - context:
-            cluster: r-devops-magistracy-project-2sem-907324971
-            user: r-devops-magistracy-project-2sem-907324971-sa
-          name: r-devops-magistracy-project-2sem-907324971-context
-        current-context: r-devops-magistracy-project-2sem-907324971-context
-        kind: Config
-        preferences: {}
-        users:
-        - name: r-devops-magistracy-project-2sem-907324971-sa
-          user:
-            token: eyJhbGciOiJSUzI1NiIsImtpZCI6IlNNMVk4RGhPMFFDZzAydzdSTDByUWFGTVBib25uOHN1RjRFTjVLc0M3MUkifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJyLWRldm9wcy1tYWdpc3RyYWN5LXByb2plY3QtMnNlbS05MDczMjQ5NzEiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlY3JldC5uYW1lIjoici1kZXZvcHMtbWFnaXN0cmFjeS1wcm9qZWN0LTJzZW0tOTA3MzI0OTcxLWNyZWRzIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZXJ2aWNlLWFjY291bnQubmFtZSI6InItZGV2b3BzLW1hZ2lzdHJhY3ktcHJvamVjdC0yc2VtLTkwNzMyNDk3MS1zYSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc2M2ZjNThkLTcyNjctNGNjOS04MDgyLWIxZjA3ZDRjODAzZCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpyLWRldm9wcy1tYWdpc3RyYWN5LXByb2plY3QtMnNlbS05MDczMjQ5NzE6ci1kZXZvcHMtbWFnaXN0cmFjeS1wcm9qZWN0LTJzZW0tOTA3MzI0OTcxLXNhIn0.eK-yH2Bo6Qv6x-Vki9qT7uTUpF-GWV1_R8Yy6jmc_pCNUaYm4TSFvTFu7Iqyo-WdxWQibs2-Xf7K81zMhu8DF-w3krktAtbXCA9gMd-0s4ilXzDDfGYAblLLweWR6BKoK75GqkEDTln19Y7kZA3JpmsM6DivHy_np0ichlTiDjL03ezJiPi865j104DAnS2yZ3s_S87kB6XWgH3zoHjoOTcTNMgJA7l74KFnnCBdYmE2fY3jaWbUCf5HAStF78p7BILl4fBzYsE48K-gONnr-zxJPN-ZkIW_sEJ-2mW6YWmeK-0GAE4xCTutXQCuQvREhA9SxlITTozPMQpQNGrn7w
-        EOF
+        # Устанавливаем переменную окружения для всех команд
+        export KUBECONFIG_CONTENT="${{ secrets.KUBE_CONFIG }}"
         
+        # Способ 1: Использование переменной окружения KUBECONFIG
+        echo "Попытка 1: Использование переменной окружения..."
+        export KUBECONFIG="$KUBECONFIG_CONTENT"
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "Успешно подключились (переменная окружения)"
+          kubectl cluster-info
+          # Проверяем права доступа
+          echo "Проверка прав доступа..."
+          kubectl get pods --all-namespaces >/dev/null 2>&1 || kubectl get pods >/dev/null 2>&1 || echo "Ограниченные права доступа"
+          exit 0
+        fi
+        
+        # Способ 1.5: Создание временного файла и использование переменной
+        echo "Попытка 1.5: Временный файл + переменная окружения..."
+        TEMP_KUBECONFIG="/tmp/kubeconfig_temp"
+        echo "$KUBECONFIG_CONTENT" > "$TEMP_KUBECONFIG"
+        chmod 600 "$TEMP_KUBECONFIG"
+        export KUBECONFIG="$TEMP_KUBECONFIG"
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "Успешно подключились (временный файл + переменная)"
+          kubectl cluster-info
+          rm -f "$TEMP_KUBECONFIG"
+          exit 0
+        fi
+        
+        # Способ 2: Прямое создание файла
+        echo "Попытка 2: Создание файла kubeconfig..."
+        echo "$KUBECONFIG_CONTENT" > ~/.kube/config
         chmod 600 ~/.kube/config
         
-        echo "Проверка подключения к кластеру..."
         if kubectl cluster-info >/dev/null 2>&1; then
-          echo "✅ Успешно подключились к кластеру"
+          echo "Успешно подключились (прямое создание файла)"
           kubectl cluster-info
-          
-          # Проверяем namespace
-          NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "r-devops-magistracy-project-2sem-907324971")
-          echo "Используем namespace: $NAMESPACE"
-          
-          # Проверяем права доступа в нашем namespace
-          echo "Проверка прав доступа в namespace $NAMESPACE..."
-          kubectl get pods -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на pods: OK" || echo "❌ Права на pods: ограничены"
-          kubectl get services -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на services: OK" || echo "❌ Права на services: ограничены"
-          kubectl get deployments -n $NAMESPACE >/dev/null 2>&1 && echo "✅ Права на deployments: OK" || echo "❌ Права на deployments: ограничены"
-          
-        else
-          echo "❌ Не удалось подключиться к кластеру"
-          echo "Проверка содержимого kubeconfig:"
-          ls -la ~/.kube/
-          echo "Первые 5 строк kubeconfig:"
-          head -5 ~/.kube/config
-          exit 1
+          exit 0
         fi
+        
+        # Способ 3: Декодирование base64
+        echo "Попытка 3: Декодирование base64..."
+        if echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config 2>/dev/null; then
+          chmod 600 ~/.kube/config
+          if kubectl cluster-info >/dev/null 2>&1; then
+            echo "Успешно подключились (base64)"
+            kubectl cluster-info
+            exit 0
+          fi
+        fi
+        
+        # Способ 4: Очистка и повторная попытка
+        echo "Попытка 4: Очистка и повторная попытка..."
+        # Убираем лишние пробелы и переносы строк
+        echo "$KUBECONFIG_CONTENT" | sed 's/^[[:space:]]*//' | grep -v '^$' > ~/.kube/config
+        chmod 600 ~/.kube/config
+        
+        if kubectl cluster-info >/dev/null 2>&1; then
+          echo "Успешно подключились (очистка)"
+          kubectl cluster-info
+          exit 0
+        fi
+        
+        # Способ 5: Проверка структуры kubeconfig
+        echo "Попытка 5: Анализ структуры kubeconfig..."
+        echo "Проверка наличия обязательных полей:"
+        echo "- apiVersion: $(grep -c 'apiVersion:' ~/.kube/config || echo '0')"
+        echo "- kind: $(grep -c 'kind:' ~/.kube/config || echo '0')"
+        echo "- clusters: $(grep -c 'clusters:' ~/.kube/config || echo '0')"
+        echo "- contexts: $(grep -c 'contexts:' ~/.kube/config || echo '0')"
+        echo "- users: $(grep -c 'users:' ~/.kube/config || echo '0')"
+        echo "- current-context: $(grep -c 'current-context:' ~/.kube/config || echo '0')"
+        
+        # Проверка валидности YAML
+        if command -v yq >/dev/null 2>&1; then
+          echo "Проверка YAML с помощью yq:"
+          yq eval '.' ~/.kube/config >/dev/null 2>&1 && echo "YAML валиден" || echo "YAML невалиден"
+        fi
+        
+        echo "Не удалось подключиться к кластеру ни одним способом"
+        echo "Проверка содержимого kubeconfig:"
+        echo "Размер файла: $(wc -c < ~/.kube/config) байт"
+        echo "Первые 10 строк (без чувствительных данных):"
+        head -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
+        echo "Последние 10 строк (без чувствительных данных):"
+        tail -10 ~/.kube/config | sed 's/certificate-authority-data: .*/certificate-authority-data: [HIDDEN]/' | sed 's/client-certificate-data: .*/client-certificate-data: [HIDDEN]/' | sed 's/client-key-data: .*/client-key-data: [HIDDEN]/'
+        echo "Проверка существования kubeconfig:"
+        if [ -f ~/.kube/config ]; then
+          echo "Файл kubeconfig существует"
+          echo "Проверка синтаксиса YAML:"
+          kubectl --kubeconfig=~/.kube/config get nodes --dry-run 2>&1 || kubectl --kubeconfig=~/.kube/config get nodes --dry-run=client 2>&1 || true
+          echo "Проверка доступности API сервера:"
+          kubectl --kubeconfig=~/.kube/config cluster-info --request-timeout=10s 2>&1 || kubectl cluster-info --request-timeout=10s 2>&1 || true
+          echo "Проверка прав доступа в namespace:"
+          kubectl --kubeconfig=~/.kube/config get pods --all-namespaces 2>&1 || kubectl --kubeconfig=~/.kube/config get pods 2>&1 || true
+        else
+          echo "Файл kubeconfig не существует"
+          echo "Проверка переменной KUBECONFIG:"
+          echo "KUBECONFIG=$KUBECONFIG"
+          echo "Проверка доступности API сервера без файла:"
+          kubectl cluster-info --request-timeout=10s 2>&1 || true
+          echo "Проверка прав доступа в namespace:"
+          kubectl get pods --all-namespaces 2>&1 || kubectl get pods 2>&1 || true
+        fi
+        echo "Проверка версии kubectl:"
+        kubectl version --client
+        exit 1
 
     - name: Clean up existing resources
       run: |
         echo "Очистка существующих ресурсов в Kubernetes..."
         
-        # Используем фиксированный namespace
-        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
         echo "Используем namespace: $NAMESPACE"
         
         # Удаляем существующий релиз Helm, если он есть
@@ -184,12 +337,13 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
-        # Используем фиксированный namespace
-        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
         echo "Деплой в namespace: $NAMESPACE"
         
         helm upgrade --install sausage-store nexus/sausage-store-chart \
           --namespace $NAMESPACE \
+          --create-namespace \
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
           --set backend.image.tag=latest \
           --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
@@ -202,8 +356,8 @@ jobs:
       run: |
         echo "Проверка статуса деплоя..."
         
-        # Используем фиксированный namespace
-        NAMESPACE="r-devops-magistracy-project-2sem-907324971"
+        # Определяем namespace из kubeconfig или используем default
+        NAMESPACE=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
         echo "Проверка в namespace: $NAMESPACE"
         
         # Проверяем статус подов
