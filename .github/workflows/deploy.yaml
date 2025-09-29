@@ -88,7 +88,53 @@ jobs:
         tags: ${{ steps.meta-backend-report.outputs.tags }}
         labels: ${{ steps.meta-backend-report.outputs.labels }}
 
-  deploy:
+  # deploy:
+  #   needs: build-and-push
+  #   runs-on: ubuntu-latest
+  #   if: github.ref == 'refs/heads/main'
+  #   
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v3
+
+  #   - name: Set up kubectl
+  #     uses: azure/setup-kubectl@v3
+  #     with:
+  #       version: 'latest'
+
+  #   - name: Configure kubectl
+  #     run: |
+  #       mkdir -p ~/.kube
+  #       echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+  #       chmod 600 ~/.kube/config
+
+  #   - name: Deploy to Kubernetes
+  #     run: |
+  #       # Обновляем образы в Helm values
+  #       sed -i "s|repository: .*|repository: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}|g" sausage-store-chart/values.yaml
+  #       sed -i "s|tag: .*|tag: ${{ github.sha }}|g" sausage-store-chart/values.yaml
+  #       
+  #       # Выполняем миграции базы данных
+  #       echo "Выполнение миграций базы данных..."
+  #       # Здесь можно добавить выполнение миграций через kubectl или отдельный job
+  #       
+  #       # Деплой через Helm
+  #       helm upgrade --install sausage-store ./sausage-store-chart \
+  #         --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }} \
+  #         --set backend.image.tag=${{ github.sha }} \
+  #         --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }} \
+  #         --set frontend.image.tag=${{ github.sha }} \
+  #         --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }} \
+  #         --set backend-report.image.tag=${{ github.sha }}
+
+  #   - name: Run database migrations
+  #     run: |
+  #       # Создаем временный pod для выполнения миграций
+  #       kubectl run migration-pod --image=postgres:13 --rm -i --restart=Never -- \
+  #         psql -h postgres-service -U postgres -d sausage_store -f /migrations/V001__create_tables.sql
+  #       # Добавить остальные миграции по аналогии
+
+  deploy-local:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -97,39 +143,34 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'latest'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
-    - name: Configure kubectl
+    - name: Deploy locally with Docker Compose
       run: |
-        mkdir -p ~/.kube
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
-        chmod 600 ~/.kube/config
-
-    - name: Deploy to Kubernetes
-      run: |
-        # Обновляем образы в Helm values
-        sed -i "s|repository: .*|repository: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}|g" sausage-store-chart/values.yaml
-        sed -i "s|tag: .*|tag: ${{ github.sha }}|g" sausage-store-chart/values.yaml
+        echo "Сборка и запуск приложения локально через Docker Compose..."
+        
+        # Создаем .env файл с переменными окружения
+        echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
+        echo "VERSION=${{ github.sha }}" >> .env
+        
+        # Останавливаем и удаляем существующие контейнеры
+        docker-compose down --remove-orphans || true
+        
+        # Запускаем сервисы с образами из Docker Hub
+        docker-compose up -d
+        
+        # Ждем запуска сервисов
+        sleep 30
         
         # Выполняем миграции базы данных
         echo "Выполнение миграций базы данных..."
-        # Здесь можно добавить выполнение миграций через kubectl или отдельный job
+        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
+        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
+        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
+        docker-compose exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
         
-        # Деплой через Helm
-        helm upgrade --install sausage-store ./sausage-store-chart \
-          --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }} \
-          --set backend.image.tag=${{ github.sha }} \
-          --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }} \
-          --set frontend.image.tag=${{ github.sha }} \
-          --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_REPORT }} \
-          --set backend-report.image.tag=${{ github.sha }}
-
-    - name: Run database migrations
-      run: |
-        # Создаем временный pod для выполнения миграций
-        kubectl run migration-pod --image=postgres:13 --rm -i --restart=Never -- \
-          psql -h postgres-service -U postgres -d sausage_store -f /migrations/V001__create_tables.sql
-        # Добавить остальные миграции по аналогии
+        echo "Деплой завершен! Сервисы доступны на:"
+        echo "- Frontend: http://localhost:80"
+        echo "- Backend: http://localhost:8080"
+        echo "- Backend-report: http://localhost:8081"

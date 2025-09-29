@@ -13,6 +13,10 @@
 ### Запуск через Docker Compose
 
 ```bash
+# Создайте файл .env с вашими настройками
+echo "DOCKER_USERNAME=your-docker-username" > .env
+echo "VERSION=latest" >> .env
+
 # Запуск всех сервисов
 docker-compose up -d
 
@@ -21,6 +25,13 @@ docker-compose logs -f
 
 # Остановка сервисов
 docker-compose down
+```
+
+### Запуск с локальной сборкой
+
+```bash
+# Для локальной разработки с пересборкой образов
+docker-compose -f docker-compose.local.yml up --build -d
 ```
 
 ### Выполнение миграций
@@ -68,15 +79,16 @@ docker push your-username/sausage-store-backend-report:latest
 
 - `DOCKER_USERNAME` — ваш логин в Docker Hub
 - `DOCKER_PASSWORD` — ваш пароль/токен Docker Hub
-- `KUBE_CONFIG` — конфигурация Kubernetes (base64 encoded)
 
 ### Автоматический деплой
 
 Пайплайн автоматически:
 1. Собирает образы при пуше в main ветку
 2. Публикует их в Docker Hub
-3. Деплоит в Kubernetes кластер
+3. Деплоит локально через Docker Compose
 4. Выполняет миграции базы данных
+
+**Примечание:** Kubernetes деплой закомментирован. Для локального деплоя используется Docker Compose.
 
 ## Структура миграций
 
