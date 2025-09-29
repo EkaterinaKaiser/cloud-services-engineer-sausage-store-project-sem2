@@ -7,27 +7,31 @@ global:
 
 
 frontend:
-### В чарте frontend отсутствуют некоторые важные файлы. Поймите какие и опишите их.
   replicas: 1
   revisionHistoryLimit: 15
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   service:
     port: 80
   ingress:
-    host: YOUR_STUDENT_HOSTNAME.students-projects.ru # Корректный домен будет указан в задании
+    host: front-ekaterinakaiser.2sem.students-projects.ru
     path: /
     pathType: Prefix
   containerPort: 80
-  image: YOUR_DOCKERHUB/sausage-frontend:latest
+  image:
+    repository: your-username/sausage-store-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
   resources:
     requests:
       memory: "128Mi"
       cpu: "100m"
     limits:
-      memory: "128Mi"
-      cpu: "1"
-  nginxConf: nginx.conf
+      memory: "256Mi"
+      cpu: "500m"
 
 backend:
   annotations:
@@ -35,9 +39,9 @@ backend:
     port: "8080"
     scrape: "true"
   env:
-    postgresUri: jdbc:postgresql://postgresql:5432/sausage-store
-    postgresUser: store
-    postgresPassword: storepassword
+    postgresUri: jdbc:postgresql://postgresql-service:5432/sausage_store
+    postgresUser: postgres
+    postgresPassword: password
     reportPath: /logs/reports
     logPath: /logs
   service:
@@ -45,34 +49,86 @@ backend:
   revisionHistoryLimit: 15
   replicas: 1
   strategy:
-  ### Опишите стратегию RollingUpdate для бэкенда
-  image: YOUR_DOCKERHUB/sausage-backend:latest
-  imagePullPolicy: Always
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  image:
+    repository: your-username/sausage-store-backend
+    tag: latest
+    pullPolicy: IfNotPresent
   resources:
     requests:
       memory: "256Mi"
       cpu: "100m"
     limits:
       memory: "512Mi"
-      cpu: "1"
+      cpu: "500m"
   containerPort: 8080
-  livenessProbe:
-  ### Опишите LivenessProbe для бэкенда
-  vpa:
-  ### Опишите VPA для бэкенда
 
 backend-report:
-### Опишите значения для backend-report
-### Приложение должно использовать стратегию Recreate
-### Приложение использует переменную PORT - порт, на котором оно запустится и DB - Uri-подключение к mongodb. 
-### DB положите в Secret, PORT в ConfigMap
-### Опишите HPA для backend-report
+  replicas: 1
+  revisionHistoryLimit: 15
+  strategy:
+    type: Recreate
+  service:
+    port: 8080
+  image:
+    repository: your-username/sausage-store-backend-report
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+  containerPort: 8080
+  env:
+    PORT: "8080"
+    DB: "mongodb://mongodb-service:27017/sausage_store"
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
 
 infra:
   postgresql:
-  ### Опишите необходимые переменные для развертывания PostgresQL в кластере Kubernetes
-  mongodb:
+    image: postgres:13
+    replicas: 1
+    containerPort: 5432
+    servicePort: 5432
+    serviceType: ClusterIP
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+    storage:
+      size: 10Gi
+      storageClass: standard
     env:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      POSTGRES_DB: sausage_store
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+  mongodb:
+    image: mongo:4.4
+    replicas: 1
     containerPort: 27017
+    servicePort: 27017
+    serviceType: ClusterIP
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+    env:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password

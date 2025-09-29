@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-init-job
+  labels:
+    app: mongodb-init
+  annotations:
+    helm.sh/hook: "post-install"
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: "before-hook-creation,hook-succeeded"
+spec:
+  template:
+    metadata:
+      labels:
+        app: mongodb-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mongodb-init
+        image: mongo:4.4
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Waiting for MongoDB to be ready..."
+          until mongosh --host mongodb-service --eval "print('MongoDB is ready')" > /dev/null 2>&1; do
+            echo "MongoDB is not ready yet. Waiting..."
+            sleep 5
+          done
+          
+          echo "Creating database and user for reports..."
+          mongosh --host mongodb-service --eval "
+            use sausage_store;
+            db.createUser({
+              user: 'reportuser',
+              pwd: 'reportpassword',
+              roles: [
+                { role: 'readWrite', db: 'sausage_store' }
+              ]
+            });
+            print('Database and user created successfully');
+          "
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: "admin"
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: "password"

@@ -125,7 +125,7 @@ jobs:
   #         psql -h postgres-service -U postgres -d sausage_store -f /migrations/V001__create_tables.sql
   #       # Добавить остальные миграции по аналогии
 
-  deploy-local:
+  add_helm_chart_to_nexus:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -134,44 +134,101 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
 
-    - name: Deploy locally with Docker Compose
+    - name: Package Helm chart
       run: |
-        echo "Сборка и запуск приложения локально через Docker Compose..."
+        helm package sausage-store-chart/
+        ls -la *.tgz
+
+    - name: Upload chart to Nexus
+      run: |
+        curl -u ${{ secrets.NEXUS_HELM_REPO_USER }}:${{ secrets.NEXUS_HELM_REPO_PASSWORD }} \
+          --upload-file sausage-store-chart-*.tgz \
+          ${{ secrets.NEXUS_HELM_REPO }}/sausage-store-chart-$(date +%Y%m%d%H%M%S).tgz
+
+  deploy_helm_chart_to_kubernetes:
+    needs: add_helm_chart_to_nexus
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Add Nexus Helm repository
+      run: |
+        helm repo add nexus ${{ secrets.NEXUS_HELM_REPO }} --username ${{ secrets.NEXUS_HELM_REPO_USER }} --password ${{ secrets.NEXUS_HELM_REPO_PASSWORD }}
+        helm repo update
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+
+    - name: Clean up existing resources
+      run: |
+        echo "🧹 Очистка существующих ресурсов в Kubernetes..."
         
-        # Создаем .env файл с переменными окружения
-        echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
-        echo "VERSION=latest" >> .env
+        # Удаляем существующий релиз Helm, если он есть
+        helm uninstall sausage-store || echo "Релиз sausage-store не найден"
         
-        # Проверяем существование образов
-        echo "Проверяем существование образов в Docker Hub..."
-        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend:latest || echo "Backend образ не найден, будет собран локально"
-        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend:latest || echo "Frontend образ не найден, будет собран локально"
-        docker pull ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report:latest || echo "Backend-report образ не найден, будет собран локально"
+        # Удаляем все ресурсы с нашими лейблами
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app.kubernetes.io/part-of=sausage-store --ignore-not-found=true || true
+        kubectl delete deployment,service,ingress,configmap,secret,pvc,hpa,vpa,job --selector=app=sausage-store --ignore-not-found=true || true
         
-        # Останавливаем и удаляем существующие контейнеры
-        docker compose down --remove-orphans || true
+        # Удаляем ресурсы по именам
+        kubectl delete deployment postgresql mongodb || true
+        kubectl delete service postgresql-service mongodb-service || true
+        kubectl delete job mongodb-init-job || true
         
-        # Собираем образы локально, если они не найдены в Docker Hub
-        echo "Собираем образы локально..."
-        docker compose -f docker-compose.local.yml build --no-cache
-        
-        # Запускаем сервисы
-        docker compose -f docker-compose.local.yml up -d
-        
-        # Ждем запуска сервисов
+        # Ждем завершения удаления
+        echo "⏳ Ожидание завершения удаления ресурсов..."
         sleep 30
         
-        # Выполняем миграции базы данных
-        echo "Выполнение миграций базы данных..."
-        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V001__create_tables.sql || true
-        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V002__change_schema.sql || true
-        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V003__insert_data.sql || true
-        docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d sausage_store -f /docker-entrypoint-initdb.d/V004__create_index.sql || true
+        echo "✅ Очистка завершена"
+
+    - name: Deploy to Kubernetes
+      run: |
+        helm upgrade --install sausage-store nexus/sausage-store-chart \
+          --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
+          --set backend.image.tag=latest \
+          --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
+          --set frontend.image.tag=latest \
+          --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report \
+          --set backend-report.image.tag=latest \
+          --wait --timeout=300s
+
+    - name: Verify deployment
+      run: |
+        echo "🔍 Проверка статуса деплоя..."
         
-        echo "Деплой завершен! Сервисы доступны на:"
-        echo "- Frontend: http://localhost:80"
-        echo "- Backend: http://localhost:8080"
-        echo "- Backend-report: http://localhost:8081"
+        # Проверяем статус подов
+        kubectl get pods -l app.kubernetes.io/part-of=sausage-store
+        kubectl get pods -l app=sausage-store
+        
+        # Проверяем сервисы
+        kubectl get services -l app.kubernetes.io/part-of=sausage-store
+        kubectl get services -l app=sausage-store
+        
+        # Проверяем Ingress
+        kubectl get ingress
+        
+        # Проверяем статус Helm релиза
+        helm status sausage-store
+        
+        echo "✅ Деплой завершен успешно!"
