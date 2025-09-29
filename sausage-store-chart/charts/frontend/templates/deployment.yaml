@@ -1,9 +1,7 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}
-  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: {{ .Chart.Name }}
     app.kubernetes.io/instance: "{{ .Release.Name }}"
@@ -13,10 +11,14 @@ metadata:
     app.kubernetes.io/component: {{ .Chart.Name }}
     app.kubernetes.io/part-of: {{ .Release.Name }}
 spec:
-  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
     type: {{ .Values.strategy.type }}
+    {{- if .Values.strategy.rollingUpdate }}
+    rollingUpdate:
+      {{- toYaml .Values.strategy.rollingUpdate | nindent 6 }}
+    {{- end }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}-{{ .Chart.Name }}
@@ -27,22 +29,23 @@ spec:
     spec:
       containers:
         - name: {{ .Chart.Name }}
-          image: {{ .Values.image }}
-          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          resources:
-{{ toYaml .Values.resources | indent 12 }} 
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: {{ .Chart.Name }}
+            - name: http
               containerPort: {{ .Values.containerPort }}
-          volumeMounts:
-          - name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-            mountPath: /etc/nginx/{{ .Values.nginxConf }}
-            subPath: {{ .Values.nginxConf }}
-            readOnly: true
-      volumes:
-        - name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-          configMap:
-            name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
-            items:
-              - key: {{ .Values.nginxConf }}
-                path: {{ .Values.nginxConf }} 
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5

@@ -1,12 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongodb-config
+  labels:
+    app: mongodb
+data:
+  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_USERNAME }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_PASSWORD }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-secret
+  labels:
+    app: mongodb
+type: Opaque
+data:
+  mongo-root-password: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_PASSWORD | b64enc }}
+---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: mongodb
-  annotations:
-    helm.sh/hook-weight: "-5"
+  labels:
+    app: mongodb
 spec:
-  serviceName: mongodb
-  replicas: 1
+  replicas: {{ .Values.mongodb.replicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: mongodb
@@ -17,48 +38,50 @@ spec:
     spec:
       containers:
       - name: mongodb
-        image: mongo:7.0
-        envFrom:
-          - configMapRef:
-              name: mongodb-conf
+        image: {{ .Values.mongodb.image }}
         ports:
         - containerPort: {{ .Values.mongodb.containerPort }}
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_INITDB_ROOT_USERNAME
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: mongo-root-password
+        livenessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: 5
+          periodSeconds: 5
         resources:
-          requests:
-            memory: "128Mi"
-            cpu: "50m"
-          limits:
-            memory: "256Mi"
-        volumeMounts:
-        - name: mongodb-data
-          mountPath: /data/db
-  volumeClaimTemplates:
-  - metadata:
-      name: mongodb-data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 1Gi
+          {{- toYaml .Values.mongodb.resources | nindent 10 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: mongodb
+  name: mongodb-service
   labels:
     app: mongodb
 spec:
+  type: {{ .Values.mongodb.serviceType }}
   ports:
-  - port: {{ .Values.mongodb.containerPort }}
+  - port: {{ .Values.mongodb.servicePort }}
     targetPort: {{ .Values.mongodb.containerPort }}
+    protocol: TCP
   selector:
     app: mongodb
-  clusterIP: None
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: mongodb-conf
-data:
-  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_USERNAME }}
-  MONGO_INITDB_ROOT_PASSWORD: {{ .Values.mongodb.env.MONGO_INITDB_ROOT_PASSWORD }}

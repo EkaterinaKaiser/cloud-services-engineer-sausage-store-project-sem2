@@ -10,9 +10,13 @@ appVersion: "latest"
 dependencies:
   - name: backend
     version: 0.1.0
+    path: ./charts/backend
   - name: backend-report
     version: 0.1.0
+    path: ./charts/backend-report
   - name: frontend
     version: 0.1.0
+    path: ./charts/frontend
   - name: infra
     version: 0.1.0
+    path: ./charts/infra

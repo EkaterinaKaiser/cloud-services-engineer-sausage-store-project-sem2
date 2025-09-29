@@ -1,12 +1,18 @@
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-conf
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/version: "{{ .Chart.AppVersion }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    app.kubernetes.io/component: {{ .Chart.Name }}
+    app.kubernetes.io/part-of: {{ .Release.Name }}
 data:
-  postgres_uri: {{ .Values.env.postgresUri }}
-  postgres_user: {{ .Values.env.postgresUser }}
-  postgres_password: {{ .Values.env.postgresPassword }}
-  report_path: {{ .Values.env.reportPath }}
-  log_path: {{ .Values.env.logPath }}
-  
+  postgres_uri: {{ .Values.env.postgresUri | quote }}
+  postgres_user: {{ .Values.env.postgresUser | quote }}
+  postgres_password: {{ .Values.env.postgresPassword | quote }}
+  report_path: {{ .Values.env.reportPath | quote }}
+  log_path: {{ .Values.env.logPath | quote }}

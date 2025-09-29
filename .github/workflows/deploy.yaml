@@ -139,6 +139,12 @@ jobs:
       with:
         version: '3.12.0'
 
+    - name: Update Helm dependencies
+      run: |
+        cd sausage-store-chart
+        helm dependency update
+        helm dependency build
+
     - name: Package Helm chart
       run: |
         helm package sausage-store-chart/
