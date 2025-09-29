@@ -255,7 +255,6 @@ jobs:
         # Деплоим с указанием версии чарта
         helm upgrade --install sausage-store nexus/sausage-store \
           --namespace $NAMESPACE \
-          --create-namespace \
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
           --set backend.image.tag=${{ github.sha }} \
           --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
