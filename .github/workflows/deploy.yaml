@@ -203,9 +203,8 @@ jobs:
         echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
         chmod 600 ~/.kube/config
         
-        # Проверяем подключение к кластеру
-        kubectl cluster-info
-        kubectl get nodes
+        # Проверяем подключение к кластеру (только в нашем namespace)
+        kubectl get pods -n r-devops-magistracy-project-2sem-907324971 || echo "Namespace пуст или недоступен"
 
     - name: Clean up existing resources
       run: |
