@@ -23,13 +23,13 @@ spec:
         - -c
         - |
           echo "Waiting for MongoDB to be ready..."
-          until mongosh --host mongodb-service --eval "print('MongoDB is ready')" > /dev/null 2>&1; do
+          until mongo --host mongodb-service --eval "print('MongoDB is ready')" > /dev/null 2>&1; do
             echo "MongoDB is not ready yet. Waiting..."
             sleep 5
           done
           
           echo "Creating database and user for reports..."
-          mongosh --host mongodb-service --eval "
+          mongo --host mongodb-service --eval "
             use sausage_store;
             db.createUser({
               user: 'reportuser',
@@ -45,3 +45,10 @@ spec:
           value: "admin"
         - name: MONGO_INITDB_ROOT_PASSWORD
           value: "password"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
