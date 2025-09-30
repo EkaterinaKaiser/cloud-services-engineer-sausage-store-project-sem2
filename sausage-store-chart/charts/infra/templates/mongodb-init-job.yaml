@@ -34,9 +34,7 @@ spec:
             db.createUser({
               user: 'reportuser',
               pwd: 'reportpassword',
-              roles: [
-                { role: 'readWrite', db: 'sausage_store' }
-              ]
+              roles: [{ role: 'readWrite', db: 'sausage_store' }]
             });
             print('Database and user created successfully');
           "

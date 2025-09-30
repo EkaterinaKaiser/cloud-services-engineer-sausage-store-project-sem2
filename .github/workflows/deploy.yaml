@@ -43,6 +43,7 @@ jobs:
       with:
         images: ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}
         tags: |
+          type=raw,value=${{ github.sha }}
           type=raw,value=latest
 
     - name: Extract metadata for backend-report
@@ -265,7 +266,7 @@ jobs:
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
           --set backend.image.tag=latest \
           --set frontend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-frontend \
-          --set frontend.image.tag=latest \
+          --set frontend.image.tag=${{ github.sha }} \
           --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report \
           --set backend-report.image.tag=latest \
           --wait --timeout=1200s --debug &
