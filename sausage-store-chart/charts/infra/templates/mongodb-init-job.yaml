@@ -29,7 +29,7 @@ spec:
           done
           
           echo "Creating database and user for reports..."
-          mongo --host mongodb-service --eval "
+          mongo --host mongodb-service --username admin --password password --authenticationDatabase admin --eval "
             use sausage_store;
             db.createUser({
               user: 'reportuser',
@@ -39,7 +39,7 @@ spec:
               ]
             });
             print('Database and user created successfully');
-          " --username admin --password password --authenticationDatabase admin
+          "
         env:
         - name: MONGO_INITDB_ROOT_USERNAME
           value: "admin"

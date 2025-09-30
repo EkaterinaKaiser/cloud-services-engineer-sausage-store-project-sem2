@@ -345,5 +345,44 @@ jobs:
         
         # Проверяем статус Helm релиза
         helm status sausage-store -n $NAMESPACE
+
+        echo "\n====== Диагностика фронтенда ======"
+        FRONT_DEPLOY="sausage-store-frontend"
+        echo "Deployment: $FRONT_DEPLOY"
+        
+        echo "\n-- rollout status --"
+        kubectl rollout status deployment/$FRONT_DEPLOY -n $NAMESPACE --timeout=60s || true
+        
+        echo "\n-- rollout history --"
+        kubectl rollout history deployment/$FRONT_DEPLOY -n $NAMESPACE || true
+        
+        echo "\n-- describe deployment --"
+        kubectl describe deployment $FRONT_DEPLOY -n $NAMESPACE | sed -n '1,200p'
+        
+        echo "\n-- replica sets --"
+        kubectl get rs -n $NAMESPACE | grep $FRONT_DEPLOY || true
+        RS=$(kubectl get rs -n $NAMESPACE -l app=$FRONT_DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        if [ -n "$RS" ]; then
+          echo "\n-- describe replicaset $RS --"
+          kubectl describe rs $RS -n $NAMESPACE | sed -n '1,120p'
+        fi
+        
+        echo "\n-- pods and images --"
+        kubectl get pods -n $NAMESPACE -l app=$FRONT_DEPLOY -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].image}{"\t"}{.spec.containers[0].imagePullPolicy}{"\n"}{end}' || true
+        
+        POD=$(kubectl get pods -n $NAMESPACE -l app=$FRONT_DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        if [ -n "$POD" ]; then
+          echo "\n-- describe pod $POD --"
+          kubectl describe pod $POD -n $NAMESPACE | sed -n '1,200p'
+          
+          echo "\n-- last 100 log lines --"
+          kubectl logs $POD -n $NAMESPACE --tail=100 || true
+          
+          echo "\n-- nginx config inside container --"
+          kubectl exec $POD -n $NAMESPACE -- sh -c 'ls -la /etc/nginx/conf.d && echo "----" && head -50 /etc/nginx/conf.d/default.conf || true' || true
+          
+          echo "\n-- container filesystem check --"
+          kubectl exec $POD -n $NAMESPACE -- sh -c 'ls -la /usr/share/nginx/html | head -50' || true
+        fi
         
         echo "Деплой завершен успешно!"
