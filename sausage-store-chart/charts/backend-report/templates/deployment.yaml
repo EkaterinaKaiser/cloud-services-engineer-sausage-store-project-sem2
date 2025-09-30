@@ -20,6 +20,47 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: mongodb-init
+          image: mongo:4.4
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for MongoDB to be ready..."
+              until mongo --host mongodb-service --username admin --password password --authenticationDatabase admin --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+                echo "MongoDB is not ready yet, waiting..."
+                sleep 2
+              done
+              echo "MongoDB is ready, creating user..."
+              mongo --host mongodb-service --username admin --password password --authenticationDatabase admin sausage_store --eval "
+                try {
+                  db.createUser({
+                    user: 'reportuser',
+                    pwd: 'reportpassword',
+                    roles: [{ role: 'readWrite', db: 'sausage_store' }]
+                  });
+                  print('User created successfully');
+                } catch (e) {
+                  if (e.code === 51003) {
+                    print('User already exists, continuing...');
+                  } else {
+                    throw e;
+                  }
+                }
+              " || echo "User creation completed"
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: "admin"
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              value: "password"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
