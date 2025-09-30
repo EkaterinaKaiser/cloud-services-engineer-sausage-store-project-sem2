@@ -27,8 +27,8 @@ FROM nginx:alpine
 # Копирование собранного приложения из первого этапа
 COPY --from=build /app/dist/frontend /usr/share/nginx/html
 
-# Копирование конфигурации nginx (если есть)
-COPY nginx.tmpl /etc/nginx/templates/default.conf.template
+# Копирование конфигурации nginx
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Открытие порта 80
 EXPOSE 80
