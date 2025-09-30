@@ -259,6 +259,7 @@ jobs:
         echo "Backend-report: ${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report:${{ github.sha }}"
         
         # Деплоим с указанием версии чарта
+        echo "Начинаем деплой приложения..."
         helm upgrade --install sausage-store nexus/sausage-store \
           --namespace $NAMESPACE \
           --set backend.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend \
@@ -267,7 +268,61 @@ jobs:
           --set frontend.image.tag=latest \
           --set backend-report.image.repository=${{ secrets.DOCKER_USERNAME }}/sausage-store-backend-report \
           --set backend-report.image.tag=latest \
-          --wait --timeout=1200s --debug
+          --wait --timeout=1200s --debug &
+        
+        # Получаем PID процесса Helm
+        HELM_PID=$!
+        
+        # Мониторим прогресс деплоя
+        echo "Мониторинг прогресса деплоя..."
+        while kill -0 $HELM_PID 2>/dev/null; do
+          echo "=== Статус подов ==="
+          kubectl get pods -n $NAMESPACE -o wide
+          
+          echo "=== События в namespace ==="
+          kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -10
+          
+          echo "=== Статус деплойментов ==="
+          kubectl get deployments -n $NAMESPACE
+          
+          echo "=== Статус сервисов ==="
+          kubectl get services -n $NAMESPACE
+          
+          echo "=== Проверка логов проблемных подов ==="
+          for pod in $(kubectl get pods -n $NAMESPACE --no-headers | grep -v Running | grep -v Completed | awk '{print $1}'); do
+            echo "--- Логи пода $pod ---"
+            kubectl logs $pod -n $NAMESPACE --tail=10 || echo "Не удалось получить логи для $pod"
+          done
+          
+          echo "=== Ожидание 30 секунд перед следующей проверкой ==="
+          sleep 30
+        done
+        
+        # Ждем завершения процесса Helm
+        wait $HELM_PID
+        HELM_EXIT_CODE=$?
+        
+        if [ $HELM_EXIT_CODE -eq 0 ]; then
+          echo "✅ Деплой завершен успешно!"
+        else
+          echo "❌ Деплой завершился с ошибкой (код: $HELM_EXIT_CODE)"
+          
+          # Дополнительная диагностика при ошибке
+          echo "=== Финальная диагностика ==="
+          echo "Статус всех ресурсов:"
+          kubectl get all -n $NAMESPACE
+          
+          echo "События с ошибками:"
+          kubectl get events -n $NAMESPACE --field-selector type=Warning --sort-by='.lastTimestamp'
+          
+          echo "Логи всех подов:"
+          for pod in $(kubectl get pods -n $NAMESPACE --no-headers | awk '{print $1}'); do
+            echo "--- Логи пода $pod ---"
+            kubectl logs $pod -n $NAMESPACE --tail=20
+          done
+          
+          exit $HELM_EXIT_CODE
+        fi
 
     - name: Verify deployment
       run: |
