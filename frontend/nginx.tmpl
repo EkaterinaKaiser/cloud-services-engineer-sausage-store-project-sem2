@@ -1,26 +1,27 @@
-{{ range $host, $containers := groupBy $ "Env.VIRTUAL_HOST" }}
-upstream {{ $host }} {
-
-{{ range $index, $value := $containers }}
-    {{ with $address := index $value.Addresses 0 }}
-    server {{ $value.Hostname }}:{{ $address.Port }};
-    {{ end }}
-{{ end }}
-
-}
-
 server {
-
-  listen 80;
-
-  location / {
-    root   /usr/share/nginx/html;
-    index  index.html;
-    try_files $uri $uri/ /index.html;
-  }
-
-  location /api {
-      proxy_pass http://{{ $host }};
-  }
+    listen 80;
+    server_name localhost;
+    
+    root /usr/share/nginx/html;
+    index index.html;
+    
+    # Основное приложение
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # API проксирование на backend
+    location /api {
+        proxy_pass http://sausage-store-backend-service:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Обработка статических файлов
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
 }
-{{ end }}

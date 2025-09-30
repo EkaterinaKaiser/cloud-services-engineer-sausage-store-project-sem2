@@ -33,6 +33,10 @@ spec:
               value: {{ .Values.env.PORT | quote }}
             - name: DB
               value: {{ .Values.env.DB | quote }}
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: {{ .Values.env.MONGO_INITDB_ROOT_USERNAME | quote }}
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              value: {{ .Values.env.MONGO_INITDB_ROOT_PASSWORD | quote }}
           livenessProbe:
             httpGet:
               path: /health
