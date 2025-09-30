@@ -47,6 +47,6 @@ affinity: {}
 
 env:
   PORT: "8080"
-  DB: "mongodb://reportuser:reportpassword@mongodb-service:27017/sausage_store?authSource=sausage_store"
+  DB: "mongodb://admin:password@mongodb-service:27017/sausage_store?authSource=admin"
   MONGO_INITDB_ROOT_USERNAME: "admin"
   MONGO_INITDB_ROOT_PASSWORD: "password"
