@@ -39,7 +39,7 @@ spec:
               ]
             });
             print('Database and user created successfully');
-          "
+          " --username admin --password password --authenticationDatabase admin
         env:
         - name: MONGO_INITDB_ROOT_USERNAME
           value: "admin"
