@@ -29,15 +29,15 @@ spec:
           done
           
           echo "Creating database and user for reports..."
-          mongo --host mongodb-service --username admin --password password --authenticationDatabase admin --eval "
-            use sausage_store;
+          # Создаем пользователя с обработкой ошибок
+          mongo --host mongodb-service --username admin --password password --authenticationDatabase admin sausage_store --eval "
             db.createUser({
               user: 'reportuser',
               pwd: 'reportpassword',
               roles: [{ role: 'readWrite', db: 'sausage_store' }]
             });
-            print('Database and user created successfully');
-          "
+            print('User created successfully');
+          " || echo "User might already exist, continuing..."
         env:
         - name: MONGO_INITDB_ROOT_USERNAME
           value: "admin"
